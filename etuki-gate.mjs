@@ -1,11 +1,11 @@
 #!/usr/bin/env node
-// Etuki Deterministic Context-Cliff & FinOps CI Gate CLI (v21-final)
+// Etuki Deterministic Context-Cliff & FinOps CI Gate CLI (v22-final)
 // Snapshot: price-20261021-v17 (Merkle Root: 383a56752336f0155d1b1a543ecfe120bf213d71a9d1e9aa05061d7164385065)
 // Note: Self-test verifies deterministic compiler math against snapshot price-20261021-v17.
 import { pathToFileURL } from "node:url";
 
 export const PRICING_SNAPSHOT_ID = "price-20261021-v17";
-export const POLICY_VERSION = "esp-v21.0-20261027";
+export const POLICY_VERSION = "esp-v22.0-20261027";
 export const PRICING_MERKLE_ROOT = "sha256:383a56752336f0155d1b1a543ecfe120bf213d71a9d1e9aa05061d7164385065";
 
 export const SNAPSHOT_SPEC = {
@@ -29,7 +29,7 @@ export function validateStrictDigitsInt(val, name) {
     const n = Number(val);
     if (Number.isSafeInteger(n)) return n;
   }
-  const err = new Error(`Invalid ${name}: must match /^\d+$/, got ${JSON.stringify(val)}`);
+  const err = new Error(`Invalid ${name}: must match /^\\d+$/, got ${JSON.stringify(val)}`);
   err.exitCode = 2;
   throw err;
 }
@@ -91,7 +91,7 @@ export function compileRoute({
     const projectedCliffRiskUsd = computeSingleCallCost(m, pTok, cTok, true, 0.0, false);
     const fb = SNAPSHOT_SPEC[m.fallback];
     const rCache = routedCacheHitRate !== null ? routedCacheHitRate : m.defaultRoutedCacheHit;
-    const routedUsd = computeSingleCallCost(fb, pTok, cTok, false, rCache, coldStartCacheWrite);
+    const routedSameTokUsd = computeSingleCallCost(fb, pTok, cTok, false, rCache, coldStartCacheWrite);
     const tokRatio = fb.rTok / m.rTok;
     const fbPromptTok = Math.round(pTok * tokRatio);
     const fbCompTok = Math.round(cTok * tokRatio);
@@ -107,13 +107,12 @@ export function compileRoute({
       zone: crossedHardCliff ? "HARD_CLIFF_BREACHED" : "PRE_CLIFF_GUARD_ZONE",
       target_model: m.fallback,
       single_call_unrouted_usd: singleCallUnroutedUsd,
-      unrouted_cost_usd: singleCallUnroutedUsd,
       projected_cliff_risk_usd: projectedCliffRiskUsd,
-      routed_cost_usd: routedUsd,
-      routed_cost_tokenizer_adjusted_usd: routedTokAdjustedUsd,
+      routed_cost_usd: routedTokAdjustedUsd,
+      realized_savings_usd: Number(Math.max(0, singleCallUnroutedUsd - routedTokAdjustedUsd).toFixed(4)),
+      routed_cost_same_token_count_usd: routedSameTokUsd,
+      realized_savings_same_token_count_usd: Number(Math.max(0, singleCallUnroutedUsd - routedSameTokUsd).toFixed(4)),
       fallback_tokenizer_ratio: Number(tokRatio.toFixed(4)),
-      realized_savings_usd: Number(Math.max(0, singleCallUnroutedUsd - routedUsd).toFixed(4)),
-      realized_savings_tokenizer_adjusted_usd: Number(Math.max(0, singleCallUnroutedUsd - routedTokAdjustedUsd).toFixed(4)),
       rollback_trigger: "eval_pass_rate_drop > 0.02 || p95_latency_ms > 2500",
       exit_code: 1
     };
@@ -150,7 +149,6 @@ export function compileRoute({
       target_model: targetModel,
       single_call_unrouted_usd: singleCallUnroutedUsd,
       unrouted_task_cost_usd: effTaskUsd,
-      unrouted_cost_usd: effTaskUsd,
       remediated_cost_usd: remediatedUsd,
       conditional_batch_eligible: allowAsyncBatch,
       rollback_trigger: "eval_pass_rate_drop > 0.02 || p95_latency_ms > 2500",
@@ -211,18 +209,18 @@ export function parseCliArgsStrict(argv) {
 }
 
 export const BOUNDARY_TEST_VECTORS_12 = [
-  { id: "CI-01", desc: "Positive baseline (Sol 15K/2K)", input: { model: "gpt-6-1-sol", promptTokens: 15000, completionTokens: 2000, requestId: "ci01" }, expected: { action: "ALLOW_DIRECT", effective_cost_usd: 0.042219, exit_code: 0 } },
-  { id: "CI-02", desc: "Hard cliff breach (Haiku 115K/4K > 100K)", input: { model: "claude-haiku-5-5", promptTokens: 115000, completionTokens: 4000, requestId: "ci02" }, expected: { action: "SOFT_BLOCK_REROUTE", unrouted_cost_usd: 0.0675, routed_cost_usd: 0.0135, routed_cost_tokenizer_adjusted_usd: 0.0105, exit_code: 1 } },
-  { id: "CI-03", desc: "Hard cliff breach (Sol 285K/20K > 272K, incl. 1.28x Sonnet tokenizer adjustment = $0.4311)", input: { model: "gpt-6-1-sol", promptTokens: 285000, completionTokens: 20000, requestId: "ci03" }, expected: { action: "SOFT_BLOCK_REROUTE", unrouted_cost_usd: 1.4400, routed_cost_usd: 0.3368, routed_cost_tokenizer_adjusted_usd: 0.4311, realized_savings_tokenizer_adjusted_usd: 1.0089, exit_code: 1 } },
-  { id: "CI-04", desc: "Budget gate block with real fallback recompute (Opus 15K/2K -> Sonnet)", input: { model: "claude-opus-5-5", promptTokens: 15000, completionTokens: 2000, requestId: "ci04" }, expected: { action: "BUDGET_GATE_BLOCK", unrouted_cost_usd: 0.108080, remediated_cost_usd: 0.054040, exit_code: 1 } },
-  { id: "CI-05", desc: "Pre-cliff soft-block zone (Sol 250K/5K: >244.8K soft-block, <=272K cliff)", input: { model: "gpt-6-1-sol", promptTokens: 250000, completionTokens: 5000, requestId: "ci05" }, expected: { action: "PRE_CLIFF_SOFT_BLOCK_WARNING", unrouted_cost_usd: 0.5500, projected_cliff_risk_usd: 1.0750, routed_cost_usd: 0.1700, routed_cost_tokenizer_adjusted_usd: 0.2176, exit_code: 1 } },
-  { id: "CI-06", desc: "Pre-cliff soft-block zone (Haiku 95K/4K: >90K soft-block, <=100K cliff)", input: { model: "claude-haiku-5-5", promptTokens: 95000, completionTokens: 4000, requestId: "ci06" }, expected: { action: "PRE_CLIFF_SOFT_BLOCK_WARNING", unrouted_cost_usd: 0.0115, projected_cliff_risk_usd: 0.0575, routed_cost_usd: 0.0115, realized_savings_usd: 0.0000, exit_code: 1 } },
-  { id: "CI-07", desc: "Cold-start cache write on routed cliff request (Sol 285K/20K coldStartCacheWrite=true)", input: { model: "gpt-6-1-sol", promptTokens: 285000, completionTokens: 20000, coldStartCacheWrite: true, requestId: "ci07" }, expected: { action: "SOFT_BLOCK_REROUTE", unrouted_cost_usd: 1.4400, routed_cost_usd: 0.8840, exit_code: 1 } },
-  { id: "CI-08", desc: "Budget gate on model without cheaper fallback (Sonnet 60K/8K)", input: { model: "claude-sonnet-5-5", promptTokens: 60000, completionTokens: 8000, requestId: "ci08" }, expected: { action: "BUDGET_GATE_BLOCK", unrouted_cost_usd: 0.216160, remediated_cost_usd: 0.079520, exit_code: 1 } },
-  { id: "CI-09", desc: "4-point boundary continuity on identical field single_call_unrouted_usd (244800 -> 244801 -> 272000 -> 272001)", input: { model: "gpt-6-1-sol", promptTokens: 272001, completionTokens: 5000, requestId: "ci09" }, expected: { action: "SOFT_BLOCK_REROUTE", single_call_unrouted_usd: 1.1630, routed_cost_usd: 0.1806, exit_code: 1 } },
-  { id: "CI-10", desc: "Fail-closed rejection on empty/non-digit token count (--in '' or null -> exit 2)", expectErrorExitCode: 2, badCliArgs: ["--model", "gpt-6-1-sol", "--in", "", "--out", "2000", "--req-id", "ci10"] },
+  { id: "CI-01", desc: "Positive baseline (Sol 15K/2K)", input: { model: "gpt-6-1-sol", promptTokens: 15000, completionTokens: 2000, requestId: "ci01" }, expected: { action: "ALLOW_DIRECT", single_call_unrouted_usd: 0.0500, effective_cost_usd: 0.042219, exit_code: 0 } },
+  { id: "CI-02", desc: "Hard cliff breach (Haiku 115K/4K > 100K, default tokenizer-adjusted routed=$0.0105)", input: { model: "claude-haiku-5-5", promptTokens: 115000, completionTokens: 4000, requestId: "ci02" }, expected: { action: "SOFT_BLOCK_REROUTE", single_call_unrouted_usd: 0.0675, routed_cost_usd: 0.0105, realized_savings_usd: 0.0570, routed_cost_same_token_count_usd: 0.0135, realized_savings_same_token_count_usd: 0.0540, exit_code: 1 } },
+  { id: "CI-03", desc: "Hard cliff breach (Sol 285K/20K > 272K, default 1.28x Sonnet tokenizer-adjusted routed=$0.4311, savings=$1.0089)", input: { model: "gpt-6-1-sol", promptTokens: 285000, completionTokens: 20000, requestId: "ci03" }, expected: { action: "SOFT_BLOCK_REROUTE", single_call_unrouted_usd: 1.4400, routed_cost_usd: 0.4311, realized_savings_usd: 1.0089, routed_cost_same_token_count_usd: 0.3368, realized_savings_same_token_count_usd: 1.1032, exit_code: 1 } },
+  { id: "CI-04", desc: "Budget gate block with real fallback recompute (Opus 15K/2K -> Sonnet)", input: { model: "claude-opus-5-5", promptTokens: 15000, completionTokens: 2000, requestId: "ci04" }, expected: { action: "BUDGET_GATE_BLOCK", single_call_unrouted_usd: 0.1000, unrouted_task_cost_usd: 0.108080, remediated_cost_usd: 0.054040, exit_code: 1 } },
+  { id: "CI-05", desc: "Pre-cliff soft-block zone (Sol 250K/5K: >244.8K soft-block, <=272K cliff)", input: { model: "gpt-6-1-sol", promptTokens: 250000, completionTokens: 5000, requestId: "ci05" }, expected: { action: "PRE_CLIFF_SOFT_BLOCK_WARNING", single_call_unrouted_usd: 0.5500, projected_cliff_risk_usd: 1.0750, routed_cost_usd: 0.2176, realized_savings_usd: 0.3324, routed_cost_same_token_count_usd: 0.1700, realized_savings_same_token_count_usd: 0.3800, exit_code: 1 } },
+  { id: "CI-06", desc: "Pre-cliff soft-block zone (Haiku 95K/4K: >90K soft-block, <=100K cliff)", input: { model: "claude-haiku-5-5", promptTokens: 95000, completionTokens: 4000, requestId: "ci06" }, expected: { action: "PRE_CLIFF_SOFT_BLOCK_WARNING", single_call_unrouted_usd: 0.0115, projected_cliff_risk_usd: 0.0575, routed_cost_usd: 0.0090, realized_savings_usd: 0.0025, routed_cost_same_token_count_usd: 0.0115, realized_savings_same_token_count_usd: 0.0000, exit_code: 1 } },
+  { id: "CI-07", desc: "Cold-start cache write on routed cliff request (Sol 285K/20K coldStartCacheWrite=true)", input: { model: "gpt-6-1-sol", promptTokens: 285000, completionTokens: 20000, coldStartCacheWrite: true, requestId: "ci07" }, expected: { action: "SOFT_BLOCK_REROUTE", single_call_unrouted_usd: 1.4400, routed_cost_usd: 1.1315, realized_savings_usd: 0.3085, routed_cost_same_token_count_usd: 0.8840, exit_code: 1 } },
+  { id: "CI-08", desc: "Budget gate on model without cheaper fallback (Sonnet 60K/8K)", input: { model: "claude-sonnet-5-5", promptTokens: 60000, completionTokens: 8000, requestId: "ci08" }, expected: { action: "BUDGET_GATE_BLOCK", single_call_unrouted_usd: 0.2000, unrouted_task_cost_usd: 0.216160, remediated_cost_usd: 0.079520, exit_code: 1 } },
+  { id: "CI-09", desc: "4-point boundary continuity on identical field single_call_unrouted_usd (244800 -> 244801 -> 272000 -> 272001)", input: { model: "gpt-6-1-sol", promptTokens: 272001, completionTokens: 5000, requestId: "ci09" }, expected: { action: "SOFT_BLOCK_REROUTE", single_call_unrouted_usd: 1.1630, routed_cost_usd: 0.2311, routed_cost_same_token_count_usd: 0.1806, exit_code: 1 } },
+  { id: "CI-10", desc: "Fail-closed rejection on empty/non-digit token count (--in '' -> exit 2)", expectErrorExitCode: 2, badCliArgs: ["--model", "gpt-6-1-sol", "--in", "", "--out", "2000", "--req-id", "ci10"] },
   { id: "CI-11", desc: "Fail-closed rejection on unknown/misspelled CLI flag (--inn 285000 -> exit 2)", expectErrorExitCode: 2, badCliArgs: ["--model", "gpt-6-1-sol", "--inn", "285000", "--out", "2000", "--req-id", "ci11"] },
-  { id: "CI-12", desc: "Fail-closed rejection on missing required requestId or flag (--in without value -> exit 2)", expectErrorExitCode: 2, badCliArgs: ["--model", "gpt-6-1-sol", "--in", "285000", "--out", "2000"] }
+  { id: "CI-12", desc: "Fail-closed rejection on missing required requestId (--in without --req-id -> exit 2)", expectErrorExitCode: 2, badCliArgs: ["--model", "gpt-6-1-sol", "--in", "285000", "--out", "2000"] }
 ];
 
 const isMain = Boolean(typeof process !== "undefined" && process.argv && process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href);
@@ -254,6 +252,10 @@ if (isMain) {
         continue;
       }
       const res = compileRoute(tv.input);
+      if ("unrouted_cost_usd" in res) {
+        console.error(`[FAIL ${tv.id}] Deprecated unrouted_cost_usd must not be present`);
+        process.exit(2);
+      }
       for (const [k, v] of Object.entries(tv.expected)) {
         if (res[k] !== v) {
           console.error(`[FAIL ${tv.id}] Expected ${k}=${v}, got ${res[k]}`);
@@ -263,7 +265,6 @@ if (isMain) {
       passed++;
       console.log(`[PASS ${tv.id}] ${tv.desc} -> ${JSON.stringify(res)}`);
     }
-    // Verify 4-point continuity using the IDENTICAL field `single_call_unrouted_usd` across all 4 points!
     const s244800 = compileRoute({ model: "gpt-6-1-sol", promptTokens: 244800, completionTokens: 5000, requestId: "c1" }).single_call_unrouted_usd;
     const s244801 = compileRoute({ model: "gpt-6-1-sol", promptTokens: 244801, completionTokens: 5000, requestId: "c2" }).single_call_unrouted_usd;
     const s272000 = compileRoute({ model: "gpt-6-1-sol", promptTokens: 272000, completionTokens: 5000, requestId: "c3" }).single_call_unrouted_usd;
