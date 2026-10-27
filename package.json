@@ -1,0 +1,26 @@
+{
+  "name": "etuki-gate",
+  "version": "1.0.0",
+  "description": "Zero-dependency AI FinOps Context-Cliff & Token Budget CI Gate CLI (by Etuki Intelligence)",
+  "type": "module",
+  "main": "etuki-gate.mjs",
+  "bin": {
+    "etuki-gate": "./etuki-gate.mjs"
+  },
+  "scripts": {
+    "test": "node etuki-gate.mjs --test"
+  },
+  "homepage": "https://www.etuki.com",
+  "keywords": [
+    "ai-finops",
+    "llm-pricing",
+    "context-cliff",
+    "openai",
+    "claude",
+    "deepseek",
+    "github-action",
+    "cost-gate"
+  ],
+  "author": "Lucas Raines <founder@etuki.com> (https://www.etuki.com)",
+  "license": "MIT"
+}

@@ -1,0 +1,13 @@
+name: Etuki Gate Self-Test CI
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+  workflow_dispatch:
+jobs:
+  verify_9_boundary_vectors:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run 9 Deterministic Boundary Test Vectors (Node 22)
+        run: node etuki-gate.mjs --test

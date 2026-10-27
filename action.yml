@@ -1,0 +1,34 @@
+name: 'Etuki AI FinOps Context-Cliff & Budget CI Gate'
+description: 'Intercept 2x-5x LLM context pricing cliffs (>272K/100K tokens) and enforce per-task token budget gates in Pull Requests.'
+author: 'Etuki Intelligence (https://www.etuki.com)'
+branding:
+  icon: 'shield'
+  color: 'blue'
+inputs:
+  model:
+    description: 'Target LLM canonical slug (e.g. gpt-6-1-sol, claude-haiku-5-5, claude-opus-5-5)'
+    required: false
+    default: 'gpt-6-1-sol'
+  prompt-tokens:
+    description: 'Prompt input tokens count'
+    required: false
+    default: '15000'
+  completion-tokens:
+    description: 'Completion output tokens count'
+    required: false
+    default: '2000'
+  run-self-test:
+    description: 'Run all 8 deterministic boundary test vectors'
+    required: false
+    default: 'true'
+runs:
+  using: 'composite'
+  steps:
+    - name: Run Etuki Deterministic FinOps Compiler Gate
+      shell: bash
+      run: |
+        if [ "${{ inputs.run-self-test }}" = "true" ]; then
+          node "${{ github.action_path }}/etuki-gate.mjs" --test
+        else
+          node "${{ github.action_path }}/etuki-gate.mjs" --model "${{ inputs.model }}" --in "${{ inputs.prompt-tokens }}" --out "${{ inputs.completion-tokens }}"
+        fi
