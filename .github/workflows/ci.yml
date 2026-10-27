@@ -5,9 +5,18 @@ on:
   pull_request:
   workflow_dispatch:
 jobs:
-  verify_9_boundary_vectors:
+  verify_12_boundary_vectors:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Run 9 Deterministic Boundary Test Vectors (Node 22)
+      - name: Setup Node.js 22 LTS
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify Published SHA-256 Checksum of etuki-gate.mjs
+        run: |
+          ACTUAL_SHA=$(sha256sum etuki-gate.mjs | awk '{print $1}')
+          echo "etuki-gate.mjs SHA-256: $ACTUAL_SHA"
+          test "$ACTUAL_SHA" = "9448132829b302b3e13cd5ce4ee7da6fe70b420013e015469951efa8482d1b23"
+      - name: Run 12 Deterministic Boundary & Fail-Closed Vectors (Node 22)
         run: node etuki-gate.mjs --test
