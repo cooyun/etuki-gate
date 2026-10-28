@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Etuki Deterministic Context-Cliff & FinOps CI Gate CLI (v22-final)
+// Etuki Deterministic Context-Cliff & FinOps CI Gate CLI (v23-final)
 // Snapshot: price-20261021-v17 (Merkle Root: 383a56752336f0155d1b1a543ecfe120bf213d71a9d1e9aa05061d7164385065)
 // Note: Self-test verifies deterministic compiler math against snapshot price-20261021-v17.
 import { pathToFileURL } from "node:url";
