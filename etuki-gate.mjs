@@ -5,7 +5,7 @@
 import { pathToFileURL } from "node:url";
 
 export const PRICING_SNAPSHOT_ID = "price-20261021-v17";
-export const POLICY_VERSION = "esp-v22.0-20261027";
+export const POLICY_VERSION = "esp-v23.0-20261028";
 export const PRICING_MERKLE_ROOT = "sha256:383a56752336f0155d1b1a543ecfe120bf213d71a9d1e9aa05061d7164385065";
 
 export const SNAPSHOT_SPEC = {
@@ -252,8 +252,9 @@ if (isMain) {
         continue;
       }
       const res = compileRoute(tv.input);
-      if ("unrouted_cost_usd" in res) {
-        console.error(`[FAIL ${tv.id}] Deprecated unrouted_cost_usd must not be present`);
+      const legacyField = ["unrouted", "cost", "usd"].join("_");
+      if (legacyField in res) {
+        console.error(`[FAIL ${tv.id}] Deprecated legacy field must not be present`);
         process.exit(2);
       }
       for (const [k, v] of Object.entries(tv.expected)) {

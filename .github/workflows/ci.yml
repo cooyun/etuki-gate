@@ -17,6 +17,6 @@ jobs:
         run: |
           ACTUAL_SHA=$(sha256sum etuki-gate.mjs | awk '{print $1}')
           echo "etuki-gate.mjs SHA-256: $ACTUAL_SHA"
-          test "$ACTUAL_SHA" = "4d383fd85eb7a7047501d59e878089f5b35232867246f5e0fdc811f8c6a08394"
+          test "$ACTUAL_SHA" = "a24a76062f472fed3a770ab2c15753b89529b7c6ada9296c98acc74ca1ea2767"
       - name: Run 12 Deterministic Boundary & Fail-Closed Vectors (Node 22)
         run: node etuki-gate.mjs --test
