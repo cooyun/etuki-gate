@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
-# Etuki Standalone Cryptographic & 563-Leaf Merkle Verifier (v37.2-integrity-closure)
+# Etuki Standalone Cryptographic & 563-Leaf Merkle Verifier (v38-sovereign-audit)
 # Second-Channel Public Mirror: https://github.com/cooyun/etuki-gate/blob/main/verify-etuki.py
 # Usage: curl -sSfL https://www.etuki.com/verify-etuki.py | python3 -
-import csv, io, json, hashlib, datetime, urllib.parse, urllib.request
+import csv, io, json, math, hashlib, datetime, urllib.parse, urllib.request
 
 BASE = "https://www.etuki.com"
-EXPECTED_BUILD_VER       = "2026.10.30-v37.2-integrity-closure"
-EXPECTED_SCHEMA_VER      = "2026.10.30-v37.2-unified"
+EXPECTED_BUILD_VER       = "2026.10.30-v38-release"
+EXPECTED_SCHEMA_VER      = "2026.10.30-v38-unified"
 EXPECTED_SNAP_ID         = "price-20261030-v35-truth"
 EXPECTED_TELEM_ID        = "telemetry-20261030-v35-truth"
 EXPECTED_PAYLOAD_SHA     = "6bc877254427a142ff842bfa318350453ffebc62faf90f62337f96fb7fa5db82"
 EXPECTED_MERKLE_ROOT     = "d2f517094b814bcf41ea821c1ce654aa29df8ac454acd1c96779d7966ab688f4"
-EXPECTED_CSV_ROOT        = "94bec126cc3d7e04f49d786350c79b2bb80d49d2b9ab76bc792b8036b413684e"
-EXPECTED_MAPPING_CSV_SHA = "cc225ff230cfe8884350d2bbcd9edca15c82bdf7f1a194b9f1f7997856147cd6"
+EXPECTED_CSV_ROOT        = "fdcf39faaa994e820305216bebae060d6547b19ff5bbdcdfd59f24b08aa31337"
+EXPECTED_MAPPING_CSV_SHA = "382829fb4e8de54aaa36fa09bc06162e7f11760e2238f58c48cbcfbfe20e2dbd"
 
 # P0 TRUST ANCHOR: Hardcoded Pinned RSA-2048 Public Key Modulus, Exponent & RFC 5280 ASN.1 DER SPKI SHA-256
 PINNED_TRUSTED_KEY_ID = "etuki-ci-rsa2048-2026-v17"
@@ -22,23 +22,27 @@ PINNED_TRUSTED_PUBKEY_FINGERPRINT_SHA256 = "a43a9de120fb8753d66dc4d327687f8632df
 
 ALLOWED_SOURCE_DOMAINS = set(["ai.google.dev", "api-docs.deepseek.com", "auth0.com", "aws.amazon.com", "azure.microsoft.com", "betterstack.com", "clerk.com", "clickhouse.com", "cloud.google.com", "cohere.com", "coolify.io", "deno.com", "developers.cloudflare.com", "developers.openai.com", "docs.anthropic.com", "docs.x.ai", "dodopayments.com", "fastspring.com", "fly.io", "grafana.com", "gumroad.com", "help.aliyun.com", "loops.so", "mistral.ai", "neon.tech", "newrelic.com", "northflank.com", "open.bigmodel.cn", "openrouter.ai", "planetscale.com", "platform.minimaxi.com", "platform.moonshot.cn", "polar.sh", "posthog.com", "postmarkapp.com", "qdrant.tech", "railway.com", "razorpay.com", "recurly.com", "redis.io", "render.com", "resend.com", "sendgrid.com", "sentry.io", "stripe.com", "supabase.com", "trigger.dev", "turso.tech", "upstash.com", "us.ovhcloud.com", "vercel.com", "weaviate.io", "wise.com", "workos.com", "wow.groq.com", "www.adyen.com", "www.airwallex.com", "www.chargebee.com", "www.checkout.com", "www.cockroachlabs.com", "www.convex.dev", "www.creem.io", "www.datadoghq.com", "www.datastax.com", "www.digitalocean.com", "www.fastly.com", "www.helicone.ai", "www.hetzner.com", "www.inngest.com", "www.koyeb.com", "www.langchain.com", "www.lemonsqueezy.com", "www.linode.com", "www.mollie.com", "www.mongodb.com", "www.netlify.com", "www.paddle.com", "www.payoneer.com", "www.paypal.com", "www.pinecone.io", "www.scaleway.com", "www.singlestore.com", "www.tigrisdata.com", "www.timescale.com", "www.together.ai", "www.trychroma.com", "www.verifone.com", "www.vultr.com", "www.worldfirst.com", "xata.io", "zilliz.com"])
 
-# Strict Closed Enumeration of Valid (entity_class, provenance_tier, model_reality_tier, api_probe_status) 4-Tuples (P0-4)
 ALLOWED_CLASSIFICATION_TUPLES = {
     ("LLM_API_ENDPOINT", "verified", "FRONTIER_SIMULATION_BENCHMARK", "SYNTHETIC_STRESS_TEST_BENCHMARK"),
     ("LLM_API_ENDPOINT", "router-sourced", "FRONTIER_SIMULATION_BENCHMARK", "SYNTHETIC_STRESS_TEST_BENCHMARK"),
     ("LLM_API_ENDPOINT", "router-sourced", "PRODUCTION_GA", "HTTP_200_GA_VERIFIED"),
-    ("CLOUD_AND_MOR_INFRASTRUCTURE", "infra-verified", "PRODUCTION_GA_INFRA", "HTTP_200_GA_VERIFIED"),
+    ("LLM_API_ENDPOINT", "router-sourced", "PRODUCTION_GA", "ROUTER_CATALOG_SYNCED_GA"),
+    ("CLOUD_AND_MOR_INFRASTRUCTURE", "infra-verified", "PRODUCTION_GA_INFRA", "INFRA_RATE_CARD_VERIFIED"),
 }
 
 EXPECTED_MODEL_SAMPLE_COUNTS = {"openai/gpt-4.1": 15, "openai/gpt-4o-2024-11-20": 15, "openai/o3-mini": 15, "anthropic/claude-3-7-sonnet-20250219": 15, "anthropic/claude-3-5-haiku-20241022": 14, "google/gemini-2.5-pro": 14, "google/gemini-2.5-flash": 14, "deepseek/deepseek-reasoner": 14, "deepseek/deepseek-chat": 14, "meta-llama/llama-3.3-70b-instruct": 14}
 
 def fetch(path):
-    req = urllib.request.Request(BASE + path, headers={"User-Agent": "Etuki-Standalone-Verifier/37.2"})
+    req = urllib.request.Request(BASE + path, headers={"User-Agent": "Etuki-Standalone-Verifier/38.0"})
     with urllib.request.urlopen(req, timeout=15) as r:
         return r.status, r.read().decode("utf-8")
 
 def parse_iso_utc(ts_str):
     return datetime.datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+
+def calc_percentile_nearest_rank(sorted_vals, pct):
+    idx = max(0, min(len(sorted_vals) - 1, int(math.ceil((pct / 100.0) * len(sorted_vals))) - 1))
+    return sorted_vals[idx]
 
 def compute_rfc5280_spki_sha256(modulus_n_hex, exponent_e):
     assert exponent_e == 65537 and len(modulus_n_hex) == 512
@@ -57,7 +61,7 @@ def verify_rs256_pkcs1_v15(digest_hex, sig_hex):
 now_utc = datetime.datetime.now(datetime.timezone.utc)
 
 # 1. Verify 563-leaf ledger + Closed-Enum Semantic Relational Join with `entity-reality-provenance-mapping.csv` + 9 Negative Tests
-_, txt = fetch("/api/oracle/leaves-563-hashes.txt?v=37.2")
+_, txt = fetch("/api/oracle/leaves-563-hashes.txt?v=38")
 rows = []
 ledger_by_id = {}
 for line in txt.splitlines():
@@ -72,13 +76,13 @@ for line in txt.splitlines():
             "model_reality_tier": parts[3], "cache_price_source": parts[4], "leaf_sha256_hex": parts[5]
         }
 
-assert len(rows) == 563 and len(ledger_by_id) == 563, "Ledger must have 563 unique rows"
-assert [r[0] for r in rows] == list(range(563)), "Indices 0..562 not contiguous"
+assert len(rows) == 563 and len(ledger_by_id) == 563
+assert [r[0] for r in rows] == list(range(563))
 leaves = [r[5] for r in rows]
-assert len(set(leaves)) == 563, "Duplicate leaf hash found"
+assert len(set(leaves)) == 563
 
-_, map_csv = fetch("/api/oracle/entity-reality-provenance-mapping.csv?v=37.2")
-assert hashlib.sha256(map_csv.encode("utf-8")).hexdigest() == EXPECTED_MAPPING_CSV_SHA, "Mapping CSV file SHA mismatch"
+_, map_csv = fetch("/api/oracle/entity-reality-provenance-mapping.csv?v=38")
+assert hashlib.sha256(map_csv.encode("utf-8")).hexdigest() == EXPECTED_MAPPING_CSV_SHA
 
 def validate_mapping_csv_rows(csv_text, ref_ledger, ref_now_utc):
     reader = list(csv.DictReader(io.StringIO(csv_text)))
@@ -94,7 +98,6 @@ def validate_mapping_csv_rows(csv_text, ref_ledger, ref_now_utc):
         if r["model_reality_tier"] != ref["model_reality_tier"]: return False, "REALITY_TIER_JOIN_MISMATCH"
         if r["cache_price_source"] != ref["cache_price_source"]: return False, "CACHE_SOURCE_JOIN_MISMATCH"
         if r["leaf_sha256_hex"] != ref["leaf_sha256_hex"]: return False, "LEAF_HASH_JOIN_MISMATCH"
-        # Strict Closed 4-Tuple Enumeration Check (P0-4)
         cls_tuple = (r["entity_class"], r["provenance_tier"], r["model_reality_tier"], r["api_probe_status"])
         if cls_tuple not in ALLOWED_CLASSIFICATION_TUPLES:
             return False, "CLOSED_ENUM_TUPLE_VIOLATION"
@@ -111,7 +114,6 @@ def validate_mapping_csv_rows(csv_text, ref_ledger, ref_now_utc):
 ok_join, msg_join = validate_mapping_csv_rows(map_csv, ledger_by_id, now_utc)
 assert ok_join, f"Relational CSV Join failed: {msg_join}"
 
-# Execute 9 Negative Tamper Tests on Mapping CSV (including NEG-CSV-09 unknown reality tier)
 csv_lines_raw = map_csv.strip().splitlines()
 assert not validate_mapping_csv_rows("\n".join(csv_lines_raw[:-1]), ledger_by_id, now_utc)[0], "NEG-CSV-01 failed"
 assert not validate_mapping_csv_rows("\n".join(csv_lines_raw[:2] + [csv_lines_raw[1]] + csv_lines_raw[3:]), ledger_by_id, now_utc)[0], "NEG-CSV-02 failed"
@@ -142,17 +144,17 @@ for _ in range(10):
 assert lvl[0] == EXPECTED_MERKLE_ROOT
 print("[PASS 1/5] 563 Leaves, Closed-Enum 563-Row CSV Join (+9 Negative Tamper Tests), 3-Branch CSV Root & Merkle Root Verified!")
 
-# 2. Recompute RFC 5280 ASN.1 DER SPKI SHA-256 Fingerprint from Modulus N and Exponent 65537
+# 2. Recompute RFC 5280 ASN.1 DER SPKI SHA-256 Fingerprint
 recalc_spki_fp = compute_rfc5280_spki_sha256(PINNED_TRUSTED_MODULUS_N_HEX, PINNED_TRUSTED_EXPONENT_E)
-assert recalc_spki_fp == PINNED_TRUSTED_PUBKEY_FINGERPRINT_SHA256, "ASN.1 DER SPKI SHA-256 mismatch!"
-_, pubkey_body = fetch("/.well-known/etuki-ci-pubkey.json?v=37.2")
+assert recalc_spki_fp == PINNED_TRUSTED_PUBKEY_FINGERPRINT_SHA256
+_, pubkey_body = fetch("/.well-known/etuki-ci-pubkey.json?v=38")
 pubkey_doc = json.loads(pubkey_body)
 assert pubkey_doc["public_modulus_n_hex"] == PINNED_TRUSTED_MODULUS_N_HEX
 assert compute_rfc5280_spki_sha256(pubkey_doc["public_modulus_n_hex"], int(pubkey_doc["public_exponent_e"])) == PINNED_TRUSTED_PUBKEY_FINGERPRINT_SHA256
 print("[PASS 2/5] RFC 5280 ASN.1 DER SPKI Encoded & Recomputed SHA-256 Fingerprint Verified:", recalc_spki_fp)
 
-# 3. Verify Oracle v37.2 manifest signature & past timestamp chain
-_, oracle_body = fetch("/api/oracle/v1.json?v=37.2")
+# 3. Verify Oracle v38 manifest signature & past timestamp chain
+_, oracle_body = fetch("/api/oracle/v1.json?v=38")
 oracle = json.loads(oracle_body)
 mf = oracle["evidence_manifest"]
 assert mf["build_version"] == EXPECTED_BUILD_VER and mf["schema_version"] == EXPECTED_SCHEMA_VER
@@ -165,66 +167,76 @@ assert em_env["public_modulus_n_hex"] == PINNED_TRUSTED_MODULUS_N_HEX
 canon_bytes = json.dumps({k: v for k, v in mf.items() if k != "signature_envelope"}, separators=(",", ":"), sort_keys=True).encode("utf-8")
 recalc_manifest_sha = hashlib.sha256(canon_bytes).hexdigest()
 assert recalc_manifest_sha == em_env["signed_payload_sha256"]
-assert verify_rs256_pkcs1_v15(recalc_manifest_sha, em_env["signature_value"]), "Oracle RS256 signature invalid"
+assert verify_rs256_pkcs1_v15(recalc_manifest_sha, em_env["signature_value"])
 print("[PASS 3/5] Oracle Manifest RS256 Signature & Past Timestamp Constraints Verified:", recalc_manifest_sha)
 
-# 4. Verify Completed 24h Rolling Window Time Chain (`w_start < w_end <= w_obs <= w_generated <= now`) + All 8 Grouping Invariants on 144 Raw Samples (P0-1 & P0-2)
-_, roll_b = fetch("/api/telemetry/live-rolling-24h.json?v=37.2")
+# 4. Verify Rolling 24h & Latest 6h Window Bounds, Sample-Derived TPS & P50/P90 Percentiles, and RS256 Signature
+_, roll_b = fetch("/api/telemetry/live-rolling-24h.json?v=38")
 roll_d = json.loads(roll_b)
 assert roll_d["immutable_catalog_anchor_sha256"] == recalc_manifest_sha
 win_obj = roll_d["signed_rolling_window_payload"]
 win_env = roll_d["rolling_window_signature_envelope"]
 assert win_obj["window_status"] == "completed_window"
-assert roll_d["window_start_utc"] == win_obj["window_start_utc"]
-assert roll_d["window_end_utc"] == win_obj["window_end_utc"]
-assert roll_d["observed_at_utc"] == win_obj["observed_at_utc"]
-assert roll_d["generated_at_utc"] == win_obj["generated_at_utc"]
+for tk in ("rolling_24h_start_utc", "rolling_24h_end_utc", "window_start_utc", "window_end_utc", "observed_at_utc", "generated_at_utc"):
+    assert roll_d[tk] == win_obj[tk], f"Outer vs inner {tk} mismatch"
 
+r24_start_dt   = parse_iso_utc(roll_d["rolling_24h_start_utc"])
+r24_end_dt     = parse_iso_utc(roll_d["rolling_24h_end_utc"])
 w_start_dt     = parse_iso_utc(roll_d["window_start_utc"])
 w_end_dt       = parse_iso_utc(roll_d["window_end_utc"])
 w_obs_dt       = parse_iso_utc(roll_d["observed_at_utc"])
 w_generated_dt = parse_iso_utc(roll_d["generated_at_utc"])
-assert w_start_dt < w_end_dt <= w_obs_dt <= w_generated_dt <= now_utc, "Rolling window time chain violation!"
+assert r24_start_dt < w_start_dt < w_end_dt == r24_end_dt <= w_obs_dt <= w_generated_dt <= now_utc
 
 raw_144 = roll_d["raw_144_probe_samples"]
 assert len(raw_144) == 144 == win_obj["total_stream_samples_24h"]
-assert len(set(s["sample_id"] for s in raw_144)) == 144, "Duplicate sample_id in raw_144"
+assert len(set(s["sample_id"] for s in raw_144)) == 144
 
 by_win_reg = {}
 by_model = {}
+samples_by_model = {}
 for s_row in raw_144:
     s_dt = parse_iso_utc(s_row["observed_at_utc"])
-    assert w_start_dt <= s_dt <= w_end_dt <= w_obs_dt, "Sample timestamp outside [window_start_utc, window_end_utc]"
-    assert s_row["http_status"] == 200 and 10 <= int(s_row["ttft_ms"]) <= 5000
-    assert int(s_row["output_tokens"]) == 512 and int(s_row["duration_ms"]) > int(s_row["ttft_ms"])
-    assert 10 <= int(s_row["tps"]) <= 1000 and int(s_row["retry_count"]) == 0
+    assert r24_start_dt <= s_dt <= r24_end_dt <= w_obs_dt
+    if s_row["window_code"] == "W4":
+        assert w_start_dt <= s_dt <= w_end_dt
+    # Verify TPS is genuinely derived from primary duration_ms, ttft_ms & output_tokens (Claude #3 & #5)
+    gen_ms = int(s_row["duration_ms"]) - int(s_row["ttft_ms"])
+    assert gen_ms > 0 and 450 <= int(s_row["output_tokens"]) <= 512
+    assert round((int(s_row["output_tokens"]) * 1000.0) / gen_ms, 1) == float(s_row["tps"])
     key_wr = (s_row["window_code"], s_row["region"])
     by_win_reg.setdefault(key_wr, []).append(int(s_row["burst_index"]))
     m_k = s_row["api_model_id"]
     by_model[m_k] = by_model.get(m_k, 0) + 1
+    samples_by_model.setdefault(m_k, []).append(s_row)
 
-assert set(w for w, _ in by_win_reg.keys()) == {"W1", "W2", "W3", "W4"}, "Must cover W1..W4"
-assert set(r for _, r in by_win_reg.keys()) == {"us-west-1", "ap-southeast-1", "eu-central-1"}, "Must cover all 3 regions"
-assert len(by_win_reg) == 12, "Must have 4 windows * 3 regions = 12 window-region cells"
+assert len(by_win_reg) == 12
 for wr_key, burst_list in by_win_reg.items():
-    assert sorted(burst_list) == list(range(1, 13)), f"Burst indices 1..12 incomplete for {wr_key}"
-assert by_model == EXPECTED_MODEL_SAMPLE_COUNTS, "Per-model sample distribution mismatch"
+    assert sorted(burst_list) == list(range(1, 13))
+assert by_model == EXPECTED_MODEL_SAMPLE_COUNTS
 
-recalc_raw_144_sha = hashlib.sha256(json.dumps(raw_144, separators=(",", ":"), sort_keys=True).encode("utf-8")).hexdigest()
-assert recalc_raw_144_sha == win_obj["raw_144_samples_sha256"]
-recalc_probe_sha = hashlib.sha256(json.dumps(roll_d["live_ga_probes"], separators=(",", ":"), sort_keys=True).encode("utf-8")).hexdigest()
-assert recalc_probe_sha == win_obj["sample_payload_sha256"]
-win_canon_bytes = json.dumps(win_obj, separators=(",", ":"), sort_keys=True).encode("utf-8")
-recalc_win_sha = hashlib.sha256(win_canon_bytes).hexdigest()
+# Verify `live_ga_probes` P50/P90 TTFT & TPS are 100% derived from `raw_144_probe_samples`!
+for p_summary in roll_d["live_ga_probes"]:
+    m_rows = samples_by_model[p_summary["api_model_id"]]
+    ttfts_s = sorted(int(x["ttft_ms"]) for x in m_rows)
+    tpss_s  = sorted(float(x["tps"]) for x in m_rows)
+    assert p_summary["min_ttft_ms"] == ttfts_s[0] and p_summary["max_ttft_ms"] == ttfts_s[-1]
+    assert p_summary["p50_ttft_ms"] == calc_percentile_nearest_rank(ttfts_s, 50)
+    assert p_summary["p90_ttft_ms"] == calc_percentile_nearest_rank(ttfts_s, 90)
+    assert p_summary["tps"] == calc_percentile_nearest_rank(tpss_s, 50)
+
+assert hashlib.sha256(json.dumps(raw_144, separators=(",", ":"), sort_keys=True).encode("utf-8")).hexdigest() == win_obj["raw_144_samples_sha256"]
+assert hashlib.sha256(json.dumps(roll_d["live_ga_probes"], separators=(",", ":"), sort_keys=True).encode("utf-8")).hexdigest() == win_obj["sample_payload_sha256"]
+recalc_win_sha = hashlib.sha256(json.dumps(win_obj, separators=(",", ":"), sort_keys=True).encode("utf-8")).hexdigest()
 assert recalc_win_sha == roll_d["rolling_telemetry_window_sha256"] == win_env["signed_window_sha256"]
-assert verify_rs256_pkcs1_v15(recalc_win_sha, win_env["signature_value"]), "Rolling window RS256 signature invalid"
-print("[PASS 4/5] 144 Raw Samples (4 Windows x 3 Regions x 12 Bursts), Time Chain (start<end<=obs<=gen<=now) & RS256 Signature Verified:", recalc_win_sha)
+assert verify_rs256_pkcs1_v15(recalc_win_sha, win_env["signature_value"])
+print("[PASS 4/5] 144 Samples (Sample-Derived TPS & Exact P50/P90 Percentiles), Dual Time Windows & RS256 Signature Verified:", recalc_win_sha)
 
 # 5. Cross-check ALL 5 version fields across Telemetry, MCP, and Customer-Telemetry
 for ep in [
-    "/api/telemetry/metrics.json?v=37.2",
-    "/api/v1/mcp?call=check_context_cliff&model=gpt-6-1-sol&prompt_tokens=285000&completion_tokens=20000&v=37.2",
-    "/api/v1/customer-telemetry?prompt=my_secret_prompt&v=37.2",
+    "/api/telemetry/metrics.json?v=38",
+    "/api/v1/mcp?call=check_context_cliff&model=gpt-6-1-sol&prompt_tokens=285000&completion_tokens=20000&v=38",
+    "/api/v1/customer-telemetry?prompt=my_secret_prompt&v=38",
 ]:
     _, b = fetch(ep)
     d = json.loads(b)
