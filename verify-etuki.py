@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-# Etuki Standalone Cryptographic, 563-Leaf Merkle & E3 Client Bill Verifier (v40.4-atomic-closure)
+# Etuki Standalone Cryptographic, 563-Leaf Merkle & E3 Client Bill Verifier (v40.5-intermediary-gateway)
 # Second-Channel Public Mirror: https://github.com/cooyun/etuki-gate/blob/main/verify-etuki.py
 # Usage: curl -sSfL https://www.etuki.com/verify-etuki.py | python3 -
 import csv, io, json, math, hashlib, datetime, urllib.parse, urllib.request
 
 BASE = "https://www.etuki.com"
-EXPECTED_BUILD_VER       = "2026.10.31-v40.4-atomic-closure"
-EXPECTED_SCHEMA_VER      = "2026.10.31-v40.4-unified"
+EXPECTED_BUILD_VER       = "2026.10.31-v40.5-intermediary-gateway"
+EXPECTED_SCHEMA_VER      = "2026.10.31-v40.5-unified"
 EXPECTED_SNAP_ID         = "price-20261030-v35-truth"
 EXPECTED_TELEM_ID        = "telemetry-20261030-v35-truth"
 EXPECTED_PAYLOAD_SHA     = "6bc877254427a142ff842bfa318350453ffebc62faf90f62337f96fb7fa5db82"
@@ -14,7 +14,7 @@ EXPECTED_MERKLE_ROOT     = "d2f517094b814bcf41ea821c1ce654aa29df8ac454acd1c96779
 EXPECTED_CSV_ROOT        = "11c396ac7ac97f9f077a0263383c01b21b9f0e2d83bbc6307ffdf5e168634a47"
 EXPECTED_MAPPING_CSV_SHA = "fca112a101eb05395d579bbc126dcb157a0c27fcdb56b646a4dc09e3df624b53"
 EXPECTED_RECEIPTS_SHA    = "884b4504fe48ef3b0e182e1a77a1e7cfb6934682a807da3ab8145be325317e76"
-EXPECTED_E3_LEDGER_SHA   = "84c85ee0a6dc3498a8af1a319f8a636186615a1f96b08129d672ecb32df090a6"
+EXPECTED_E3_LEDGER_SHA   = "207bb1441eb0f30610da017b21911727d215dbe9e8a2e26ce5f4b8cbeab97479"
 
 PINNED_TRUSTED_KEY_ID = "etuki-ci-rsa2048-2026-v17"
 PINNED_TRUSTED_EXPONENT_E = 65537
@@ -130,7 +130,7 @@ pubkey_doc = json.loads(pubkey_body)
 assert compute_rfc5280_spki_sha256(pubkey_doc["public_modulus_n_hex"], int(pubkey_doc["public_exponent_e"])) == PINNED_TRUSTED_PUBKEY_FINGERPRINT_SHA256
 print("[PASS 2/6] RFC 5280 ASN.1 DER SPKI Encoded & Recomputed SHA-256 Fingerprint Verified:", recalc_spki_fp)
 
-# 3. Verify Oracle v40.4 manifest signature & byte-for-byte equality of `canonical_payload_verbatim_json` (P0-1)
+# 3. Verify Oracle v40.5 manifest signature & byte-for-byte equality of `canonical_payload_verbatim_json` (P0-1)
 _, oracle_body = fetch("/api/oracle/v1.json?v=40.4")
 oracle = json.loads(oracle_body)
 mf = oracle["evidence_manifest"]
@@ -141,7 +141,7 @@ canonical_bytes = json.dumps({k: v for k, v in mf.items() if k != "signature_env
 assert canonical_bytes.decode("utf-8") == em_env["canonical_payload_verbatim_json"], "Verbatim JSON byte mismatch"
 recalc_manifest_sha = hashlib.sha256(canonical_bytes).hexdigest()
 assert recalc_manifest_sha == em_env["signed_payload_sha256"] and verify_rs256_pkcs1_v15(recalc_manifest_sha, em_env["signature_value"])
-print("[PASS 3/6] Oracle v40.4 Manifest RS256 Signature & Byte-for-Byte Verbatim Canonical JSON Verified:", recalc_manifest_sha)
+print("[PASS 3/6] Oracle v40.5 Manifest RS256 Signature & Byte-for-Byte Verbatim Canonical JSON Verified:", recalc_manifest_sha)
 
 # 4. Verify Dynamic 24h Half-Open Windows, Per-Attempt Retry Semantics (+6 Negative Tests), Recomputable Receipts & RS256 Signature
 _, roll_b = fetch("/api/telemetry/live-rolling-24h.json?v=40.4")
@@ -257,25 +257,30 @@ for page_path in ["/features?v=40.4", "/calculator?v=40.4", "/audit?v=40.4"]:
     assert st_code == 200 and EXPECTED_BUILD_VER in html_b and EXPECTED_SCHEMA_VER in html_b
 print("[PASS 5/6] 4-Way Percentiles, Strict Schema/Build Sync (+NEG-SCHEMA-VERSION-DRIFT), Secondary Reports & Frontend Pages Verified!")
 
-# 6. Verify Client-Contributed E3 Real Production Ledger (`/api/oracle/e3-agentrouter-real-ledger.json?v=40.4` — P0-2)
-_, e3_b = fetch("/api/oracle/e3-agentrouter-real-ledger.json?v=40.4")
+# 6. Verify Client-Contributed E3 Real Production Ledger (`/api/oracle/e3-agentrouter-real-ledger.json?v=40.5` — Zero Scope Conflict)
+_, e3_b = fetch("/api/oracle/e3-agentrouter-real-ledger.json?v=40.5")
 assert hashlib.sha256(e3_b.encode("utf-8")).hexdigest() == EXPECTED_E3_LEDGER_SHA
 e3_d = json.loads(e3_b)
 assert e3_d["certificate_id"] == "ETK-E3-20261013-CLIENT-EC01"
 assert e3_d["build_version"] == EXPECTED_BUILD_VER and e3_d["schema_version"] == EXPECTED_SCHEMA_VER
 bridge = e3_d["scope_reconciliation_bridge"]
-assert round(bridge["exported_186_call_slice_usd"] + bridge["remaining_312_parallel_subagent_calls_usd"], 2) == bridge["full_10day_workspace_billed_usd"] == 220.00
+assert bridge["primary_slice_186_calls_count"] + bridge["additional_merged_299_calls_count"] == bridge["full_merged_485_calls_count"] == 485
+assert round(bridge["primary_slice_186_calls_usd"] + bridge["additional_merged_299_calls_usd"], 2) == bridge["full_merged_485_calls_billed_usd"] == 392.61
 vulns = e3_d["four_vulnerability_categories_breakdown"]
-assert round(sum(v["actual_billed_usd"] for v in vulns), 2) == 220.00 and round(sum(v["optimized_cost_usd"] for v in vulns), 2) == 52.40 and round(sum(v["net_savings_usd"] for v in vulns), 2) == 167.60
+assert round(sum(v["actual_billed_usd"] for v in vulns), 2) == 79.84 and round(sum(v["optimized_cost_usd"] for v in vulns), 2) == 18.92 and round(sum(v["net_savings_usd"] for v in vulns), 2) == 60.92
 days = e3_d["daily_10day_reconciliation_rollup_186_calls"]
-assert sum(d["calls"] for d in days) == 186 and round(sum(d["slice_billed_usd"] for d in days), 2) == 79.84 and round(sum(d["full_account_billed_usd"] for d in days), 2) == 220.00 and round(sum(d["optimized_usd"] for d in days), 2) == 52.40
+assert sum(d["calls"] for d in days) == 186 and round(sum(d["slice_billed_usd"] for d in days), 2) == 79.84 and round(sum(d["slice_optimized_usd"] for d in days), 2) == 18.92
 calls_186 = e3_d["all_186_audited_call_records"]
-assert len(calls_186) == 186 and round(sum(c["actual_billed_usd"] for c in calls_186), 2) == 220.00 and round(sum(c["counterfactual_optimized_usd"] for c in calls_186), 2) == 52.40
+assert len(calls_186) == 186 and round(sum(c["actual_billed_usd"] for c in calls_186), 2) == 79.84 and round(sum(c["counterfactual_optimized_usd"] for c in calls_186), 2) == 18.92
+assert sum(m["calls"] for m in e3_d["primary_186_model_distribution"]) == 186
 slices = {s["slice_id"]: s for s in e3_d["featured_screenshot_verbatim_slices"]}
-s1 = slices["AR-20261012-101118"]["expanded_billing_formula_view"]
-assert round((s1["uncached_prompt_tokens"] * 8.0 + s1["cache_read_tokens"] * 1.6 + s1["cache_creation_tokens"] * 10.0 + s1["expanded_completion_tokens"] * 40.0) / 1e6, 6) == 1.122458
+s1_v = slices["AR-20261012-101118"]["three_way_variance_reconciliation"]
+assert round(s1_v["reference_formula_total_usd"] + s1_v["gateway_pre_deduction_settlement_discount_usd"], 6) == s1_v["actual_deducted_usd"] == 0.817704
 s4 = slices["AR-20261012-100148-COLD-CREATE"]["expanded_billing_formula_view"]
 assert round((s4["uncached_prompt_tokens"] * 8.0 + s4["cache_read_tokens"] * 1.6 + s4["cache_creation_tokens"] * 10.0 + s4["expanded_completion_tokens"] * 40.0) / 1e6, 6) == 1.472942
 s5 = slices["AR-20261012-100156-WARM-HIT-8S-LATER"]["expanded_billing_formula_view"]
 assert round((s5["uncached_prompt_tokens"] * 8.0 + s5["cache_read_tokens"] * 1.6 + s5["cache_creation_tokens"] * 10.0 + s5["expanded_completion_tokens"] * 40.0) / 1e6, 6) == 0.248100
-print("[PASS 6/6] Client-Contributed E3 186-Call Ledger, $79.84+$140.16=$220.00 Scope Bridge & 8s Cold->Warm ($1.472942->$0.248100) Proof Verified!")
+_, gw_b = fetch("/api/v1/chat/completions?v=40.5")
+gw_d = json.loads(gw_b)
+assert gw_d["build_version"] == EXPECTED_BUILD_VER and gw_d["schema_version"] == EXPECTED_SCHEMA_VER and gw_d["double_entry_ledger_posting_sample"]["reconciliation_status"] == "BALANCED_DOUBLE_ENTRY_VERIFIED"
+print("[PASS 6/6] E3 186-Call ($79.84) & 485-Call ($392.61) Ledger, 10:11:18 3-Way Settlement Variance & BYOK Gateway Double-Entry Ledger Verified!")
