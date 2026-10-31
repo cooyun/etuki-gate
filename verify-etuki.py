@@ -135,7 +135,7 @@ _, oracle_body = fetch("/api/oracle/v1.json?v=40.7")
 oracle = json.loads(oracle_body)
 mf = oracle["evidence_manifest"]
 assert mf["build_version"] == EXPECTED_BUILD_VER and mf["schema_version"] == EXPECTED_SCHEMA_VER
-assert parse_iso_utc(mf["source_verified_at"]) <= parse_iso_utc(mf["generated_at"]) <= now_utc < parse_iso_utc(mf["stale_after"]) < parse_iso_utc(mf["expires_at"])
+assert parse_iso_utc(mf["source_verified_at"]) <= parse_iso_utc(mf["generated_at"]) <= now_utc < parse_iso_utc(mf["stale_after"]) < parse_iso_utc(mf["expires_at"]) < parse_iso_utc(mf["stale_after"]) < parse_iso_utc(mf["expires_at"])
 em_env = mf["signature_envelope"]
 canonical_bytes = json.dumps({k: v for k, v in mf.items() if k != "signature_envelope"}, separators=(",", ":"), sort_keys=True).encode("utf-8")
 assert canonical_bytes.decode("utf-8") == em_env["canonical_payload_verbatim_json"], "Verbatim JSON byte mismatch"
