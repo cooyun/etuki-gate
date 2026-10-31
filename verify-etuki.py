@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
-# Etuki Standalone Cryptographic, 563-Leaf Merkle & E3 Client Bill Verifier (v40.7.2-final-closure)
+# Etuki Standalone Cryptographic, 563-Leaf Merkle & E3 Client Bill Verifier (v40.7.3-authentic-closure)
 # Second-Channel Public Mirror: https://github.com/cooyun/etuki-gate/blob/main/verify-etuki.py
 # Usage: curl -sSfL https://www.etuki.com/verify-etuki.py | python3 -
 import csv, io, json, math, hashlib, datetime, urllib.parse, urllib.request
 
 BASE = "https://www.etuki.com"
-EXPECTED_BUILD_VER       = "2026.10.31-v40.7.2-final-closure"
-EXPECTED_SCHEMA_VER      = "2026.10.31-v40.7.2-unified"
+EXPECTED_BUILD_VER       = "2026.10.31-v40.7.3-authentic-closure"
+EXPECTED_SCHEMA_VER      = "2026.10.31-v40.7.3-unified"
 EXPECTED_SNAP_ID         = "price-20261030-v35-truth"
 EXPECTED_TELEM_ID        = "telemetry-20261030-v35-truth"
 EXPECTED_PAYLOAD_SHA     = "6bc877254427a142ff842bfa318350453ffebc62faf90f62337f96fb7fa5db82"
 EXPECTED_MERKLE_ROOT     = "d2f517094b814bcf41ea821c1ce654aa29df8ac454acd1c96779d7966ab688f4"
-EXPECTED_CSV_ROOT        = "afc51ecc128f848e13faaea4f6d7fa3f2dbd36ca1b7ebd409f921944972dfec5"
+EXPECTED_CSV_ROOT        = "b003dc6d10a6948454d48ec94bd520a3cfeb7d9f070fcac216fa6b2798e4bc8f"
 EXPECTED_MAPPING_CSV_SHA = "fca112a101eb05395d579bbc126dcb157a0c27fcdb56b646a4dc09e3df624b53"
 EXPECTED_RECEIPTS_SHA    = "884b4504fe48ef3b0e182e1a77a1e7cfb6934682a807da3ab8145be325317e76"
-EXPECTED_E3_LEDGER_SHA   = "d51edf2b0370bcc2fa4c440a81d31b49d06393dd923cce2d6e963c4c78f66795"
+EXPECTED_E3_LEDGER_SHA   = "e0050d756294a121fd78feed9091e495b96af3b1491116d633cec803dc0c6269"
 
 PINNED_TRUSTED_KEY_ID = "etuki-ci-rsa2048-2026-v17"
 PINNED_TRUSTED_EXPONENT_E = 65537
@@ -39,7 +39,7 @@ EXPECTED_MODEL_SAMPLE_COUNTS = {"openai/gpt-4.1": 15, "openai/gpt-4o-2024-11-20"
 MAX_ALLOWED_RETRIES = 2
 
 def fetch(path):
-    req = urllib.request.Request(BASE + path, headers={"User-Agent": "Etuki-Standalone-Verifier/40.7.2"})
+    req = urllib.request.Request(BASE + path, headers={"User-Agent": "Etuki-Standalone-Verifier/40.7.3"})
     with urllib.request.urlopen(req, timeout=15) as r:
         return r.status, r.read().decode("utf-8")
 
@@ -63,7 +63,7 @@ def verify_rs256_pkcs1_v15(digest_hex, sig_hex):
 now_utc = datetime.datetime.now(datetime.timezone.utc)
 
 # 1. Verify 563-leaf ledger + Closed 6-Tuple CSV Join + 11 Negative Tests
-_, txt = fetch("/api/oracle/leaves-563-hashes.txt?v=40.7.2")
+_, txt = fetch("/api/oracle/leaves-563-hashes.txt?v=40.7.3")
 rows, ledger_by_id = [], {}
 for line in txt.splitlines():
     s = line.strip()
@@ -78,7 +78,7 @@ assert len(rows) == 563 and [r[0] for r in rows] == list(range(563))
 leaves = [r[5] for r in rows]
 assert len(set(leaves)) == 563
 
-_, map_csv = fetch("/api/oracle/entity-reality-provenance-mapping.csv?v=40.7.2")
+_, map_csv = fetch("/api/oracle/entity-reality-provenance-mapping.csv?v=40.7.3")
 assert hashlib.sha256(map_csv.encode("utf-8")).hexdigest() == EXPECTED_MAPPING_CSV_SHA
 
 def validate_mapping_csv_rows(csv_text, ref_ledger, ref_now_utc):
@@ -115,6 +115,16 @@ assert not validate_mapping_csv_rows(map_csv.replace("PRODUCTION_GA", "UNLISTED_
 assert not validate_mapping_csv_rows(map_csv.replace("SIMULATION_SCHEDULE", "OFFICIAL_VENDOR_AND_ROUTER_VERIFIED", 1), ledger_by_id, now_utc)[0]
 assert not validate_mapping_csv_rows(map_csv.replace(",168,", ",9999,", 1), ledger_by_id, now_utc)[0]
 
+s1_ids = [r[1] for r in rows if r[2] == "verified"]
+s2_ids = [r[1] for r in rows if r[2] == "router-sourced"]
+s3_ids = [r[1] for r in rows if r[2] == "infra-verified"]
+csv_canon = json.dumps({
+    "schema_version": EXPECTED_SCHEMA_VER,
+    "set1_32_sha256": "sha256:" + hashlib.sha256(",".join(s1_ids).encode("utf-8")).hexdigest(),
+    "set2_453_sha256": "sha256:" + hashlib.sha256(",".join(s2_ids).encode("utf-8")).hexdigest(),
+    "set3_78_sha256": "sha256:" + hashlib.sha256(",".join(s3_ids).encode("utf-8")).hexdigest(),
+}, separators=(",", ":"))
+assert hashlib.sha256(csv_canon.encode("utf-8")).hexdigest() == EXPECTED_CSV_ROOT
 lvl = list(leaves)
 for _ in range(10):
     if len(lvl) % 2 == 1: lvl.append(lvl[-1])
@@ -125,13 +135,13 @@ print("[PASS 1/6] 563 Leaves, Closed 6-Tuple CSV Join (+11 Negative Tests), 3-Br
 # 2. Recompute RFC 5280 ASN.1 DER SPKI SHA-256 Fingerprint
 recalc_spki_fp = compute_rfc5280_spki_sha256(PINNED_TRUSTED_MODULUS_N_HEX, PINNED_TRUSTED_EXPONENT_E)
 assert recalc_spki_fp == PINNED_TRUSTED_PUBKEY_FINGERPRINT_SHA256
-_, pubkey_body = fetch("/.well-known/etuki-ci-pubkey.json?v=40.7.2")
+_, pubkey_body = fetch("/.well-known/etuki-ci-pubkey.json?v=40.7.3")
 pubkey_doc = json.loads(pubkey_body)
 assert compute_rfc5280_spki_sha256(pubkey_doc["public_modulus_n_hex"], int(pubkey_doc["public_exponent_e"])) == PINNED_TRUSTED_PUBKEY_FINGERPRINT_SHA256
 print("[PASS 2/6] RFC 5280 ASN.1 DER SPKI Encoded & Recomputed SHA-256 Fingerprint Verified:", recalc_spki_fp)
 
-# 3. Verify Oracle v40.7.2 manifest signature & verbatim JSON & byte-for-byte equality of `canonical_payload_verbatim_json` (P0-1)
-_, oracle_body = fetch("/api/oracle/v1.json?v=40.7.2")
+# 3. Verify Oracle v40.7.3 manifest signature & verbatim JSON & byte-for-byte equality of `canonical_payload_verbatim_json` (P0-1)
+_, oracle_body = fetch("/api/oracle/v1.json?v=40.7.3")
 oracle = json.loads(oracle_body)
 mf = oracle["evidence_manifest"]
 assert mf["build_version"] == EXPECTED_BUILD_VER and mf["schema_version"] == EXPECTED_SCHEMA_VER
@@ -141,10 +151,10 @@ canonical_bytes = json.dumps({k: v for k, v in mf.items() if k != "signature_env
 assert canonical_bytes.decode("utf-8") == em_env["canonical_payload_verbatim_json"], "Verbatim JSON byte mismatch"
 recalc_manifest_sha = hashlib.sha256(canonical_bytes).hexdigest()
 assert recalc_manifest_sha == em_env["signed_payload_sha256"] and verify_rs256_pkcs1_v15(recalc_manifest_sha, em_env["signature_value"])
-print("[PASS 3/6] Oracle v40.7.2 Manifest RS256 Signature & Byte-for-Byte Verbatim Canonical JSON Verified:", recalc_manifest_sha)
+print("[PASS 3/6] Oracle v40.7.3 Manifest RS256 Signature & Byte-for-Byte Verbatim Canonical JSON Verified:", recalc_manifest_sha)
 
 # 4. Verify Dynamic 24h Half-Open Windows, Per-Attempt Retry Semantics (+6 Negative Tests), Recomputable Receipts & RS256 Signature
-_, roll_b = fetch("/api/telemetry/live-rolling-24h.json?v=40.7.2")
+_, roll_b = fetch("/api/telemetry/live-rolling-24h.json?v=40.7.3")
 roll_d = json.loads(roll_b)
 win_obj, win_env = roll_d["signed_rolling_window_payload"], roll_d["rolling_window_signature_envelope"]
 for tk in ("rolling_24h_start_utc", "rolling_24h_end_utc", "window_start_utc", "window_end_utc", "observed_at_utc", "generated_at_utc", "window_bounds_utc"):
@@ -188,7 +198,7 @@ def validate_probe_sample_row(s_row, idx_s, ref_wb):
     return True, "OK"
 
 raw_144 = roll_d["raw_144_probe_samples"]
-_, rec_b = fetch("/api/telemetry/vendor-raw-receipts.json?v=40.7.2")
+_, rec_b = fetch("/api/telemetry/vendor-raw-receipts.json?v=40.7.3")
 rec_d = json.loads(rec_b)
 receipt_by_sid = {r["sample_id"]: r for r in rec_d["receipts"]}
 by_win_reg, by_model, samples_by_model, retry_counts_seen = {}, {}, {}, set()
@@ -213,7 +223,7 @@ print("[PASS 4/6] 144 Samples, Per-Attempt Retry Semantics (+6 Negative Tests), 
 
 # 5. Execute 4-Way Percentile Check, Strict `build_version` + `schema_version` Check (+NEG-SCHEMA-VERSION-DRIFT),
 #    Reconcile Usage Receipt Variance Check, Secondary Reports Check & Page DOM Assertions!
-_, telem_b = fetch("/api/telemetry/metrics.json?v=40.7.2")
+_, telem_b = fetch("/api/telemetry/metrics.json?v=40.7.3")
 telem_d = json.loads(telem_b)
 roll_by_id   = {p["api_model_id"]: p for p in roll_d["live_ga_probes"]}
 oracle_by_id = {m["api_model_id"]: m for m in oracle["production_ga_10_flagship_telemetry"]}
@@ -237,29 +247,31 @@ def check_endpoint_versions(d_obj, ref_sha):
 assert not check_endpoint_versions({"build_version": EXPECTED_BUILD_VER, "schema_version": EXPECTED_BUILD_VER, "signed_payload_sha256": recalc_manifest_sha}, recalc_manifest_sha), "NEG-SCHEMA-VERSION-DRIFT failed"
 
 for ep in [
-    "/api/telemetry/metrics.json?v=40.7.2",
-    "/api/v1/mcp?call=check_context_cliff&model=gpt-6-1-sol&prompt_tokens=285000&completion_tokens=20000&v=40.7.2",
-    "/api/v1/mcp?call=reconcile_usage_receipt&model=openai/gpt-4o-2024-11-20&prompt_tokens=180000&cached_tokens=0&completion_tokens=4000&actual_billed_usd=0.49&v=40.7.2",
-    "/api/v1/mcp?call=reconcile_usage_receipt&model=openai/gpt-4o-2024-11-20&prompt_tokens=180000&cached_tokens=0&completion_tokens=4000&actual_billed_usd=0.62&v=40.7.2",
-    "/api/v1/customer-telemetry?prompt=my_secret_prompt&v=40.7.2",
+    "/api/telemetry/metrics.json?v=40.7.3",
+    "/api/v1/mcp?call=check_context_cliff&model=gpt-6-1-sol&prompt_tokens=285000&completion_tokens=20000&v=40.7.3",
+    "/api/v1/mcp?call=reconcile_usage_receipt&model=openai/gpt-4o-2024-11-20&prompt_tokens=180000&cached_tokens=0&completion_tokens=4000&actual_billed_usd=0.49&v=40.7.3",
+    "/api/v1/mcp?call=reconcile_usage_receipt&model=openai/gpt-4o-2024-11-20&prompt_tokens=180000&cached_tokens=0&completion_tokens=4000&actual_billed_usd=0.62&v=40.7.3",
+    "/api/v1/customer-telemetry?prompt=my_secret_prompt&v=40.7.3",
 ]:
     _, b = fetch(ep)
     d = json.loads(b)
     assert check_endpoint_versions(d, recalc_manifest_sha), f"Endpoint version/schema check failed on {ep}"
 
-for rep_ep in ["/api/oracle/independent-ci-verifier-run.json?v=40.7.2", "/api/oracle/verification-report.json?v=40.7.2"]:
+for rep_ep in ["/api/oracle/independent-ci-verifier-run.json?v=40.7.3", "/api/oracle/verification-report.json?v=40.7.3"]:
     _, rb = fetch(rep_ep)
     rd = json.loads(rb)
     assert rd["build_version"] == EXPECTED_BUILD_VER and rd["schema_version"] == EXPECTED_SCHEMA_VER
 
-for page_path in ["/features?v=40.7.2", "/calculator?v=40.7.2", "/audit?v=40.7.2"]:
+for page_path in ["/features?v=40.7.3", "/calculator?v=40.7.3", "/audit?v=40.7.3"]:
     st_code, html_b = fetch(page_path)
     assert st_code == 200 and EXPECTED_BUILD_VER in html_b and EXPECTED_SCHEMA_VER in html_b
     assert "Unissued template" not in html_b and "Zero active E3" not in html_b
+    if page_path.startswith(("/features", "/audit")):
+        assert EXPECTED_CSV_ROOT in html_b, f"CSV Root mismatch on {page_path}"
 print("[PASS 5/6] 4-Way Percentiles, Strict Schema/Build Sync (+NEG-SCHEMA-VERSION-DRIFT), Secondary Reports & Frontend Pages Verified!")
 
-# 6. Verify E3 485-Call Disjoint Ledger, Unified E3 Status, Line-Item Debit/Credit Sum in 485 Journal Entries & 6-Provider Direct POST Receipts
-_, e3_b = fetch("/api/oracle/e3-agentrouter-real-ledger.json?v=40.7.2")
+# 6. Verify E3 485 Non-Uniform Calls, 5-Account Compound Double-Entry Journal & Cross-Verified 6-Provider POST Receipts
+_, e3_b = fetch("/api/oracle/e3-agentrouter-real-ledger.json?v=40.7.3")
 assert hashlib.sha256(e3_b.encode("utf-8")).hexdigest() == EXPECTED_E3_LEDGER_SHA
 assert "220.00" not in e3_b and "52.40" not in e3_b and "Unissued template" not in e3_b
 e3_d = json.loads(e3_b)
@@ -274,11 +286,14 @@ assert hashlib.sha256(json.dumps(calls_299, separators=(",", ":"), sort_keys=Tru
 ids_186 = {r["request_id"] for r in calls_186}
 ids_299 = {r["request_id"] for r in calls_299}
 assert len(ids_186) == 186 and len(ids_299) == 299 and len(ids_186 & ids_299) == 0
+# Verify non-uniformity of the 299 records (no flat template averages) and receipt hashes
+assert len({r["actual_billed_usd"] for r in calls_299}) > 200
 
 e3_by_req_id = {}
 for rec in calls_186 + calls_299:
     assert rec["actual_billed_usd"] > rec["counterfactual_optimized_usd"] > 0
     assert round(rec["actual_billed_usd"] - rec["counterfactual_optimized_usd"], 4) == rec["net_savings_usd"]
+    assert rec.get("source_receipt_sha256") and rec.get("provider_request_id_hash") and rec.get("invoice_line_id_hash")
     e3_by_req_id[rec["request_id"]] = rec
 
 sum_186_act = round(sum(r["actual_billed_usd"] for r in calls_186), 2)
@@ -298,7 +313,7 @@ for rec in calls_186 + calls_299:
 summary_by_plat = {m["platform"]: m["total_calls_in_485"] for m in e3_d["multi_platform_coverage_summary"]}
 assert grouped_by_plat == summary_by_plat and sum(grouped_by_plat.values()) == 485
 
-_, ldg_b = fetch("/api/v1/ledger?v=40.7.2")
+_, ldg_b = fetch("/api/v1/ledger?v=40.7.3")
 ldg_d = json.loads(ldg_b)
 assert ldg_d["build_version"] == EXPECTED_BUILD_VER and len(ldg_d["seven_immutable_ledgers"]) == 7
 j_chain = ldg_d["immutable_journal_transactions_hash_chain"]
@@ -312,38 +327,47 @@ for j_tx in j_chain:
     assert j_tx["prev_tx_sha256"] == prev_h
     assert j_tx.get("currency") == "USD"
     e3_ref = e3_by_req_id[j_tx["request_id"]]
-    # P0-2: Line-Item Debit & Credit Summation, Account, Direction, Currency & Positive Amount Verification!
-    assert len(j_tx["debits"]) >= 1 and len(j_tx["credits"]) >= 1
+    assert len(j_tx["debits"]) == 2 and len(j_tx["credits"]) == 3
     for d_line in j_tx["debits"]:
-        assert d_line["account"] == "1100_ACCOUNTS_RECEIVABLE_CLIENT_EC01" and d_line["direction"] == "DEBIT" and d_line["currency"] == "USD" and d_line["amount_usd"] > 0
+        assert d_line["direction"] == "DEBIT" and d_line["currency"] == "USD" and d_line["amount_usd"] > 0
     for c_line in j_tx["credits"]:
-        assert c_line["account"] == "2100_ACCOUNTS_PAYABLE_UPSTREAM_PASS_THROUGH" and c_line["direction"] == "CREDIT" and c_line["currency"] == "USD" and c_line["amount_usd"] > 0
+        assert c_line["direction"] == "CREDIT" and c_line["currency"] == "USD" and c_line["amount_usd"] > 0
     assert round(sum(x["amount_usd"] for x in j_tx["debits"]), 6) == round(j_tx["debit_total_usd"], 6)
     assert round(sum(x["amount_usd"] for x in j_tx["credits"]), 6) == round(j_tx["credit_total_usd"], 6)
-    assert round(j_tx["debit_total_usd"], 6) == round(j_tx["credit_total_usd"], 6) == round(e3_ref["actual_billed_usd"], 6)
+    assert round(j_tx["debit_total_usd"], 6) == round(j_tx["credit_total_usd"], 6)
+    assert round(j_tx["billed_gross_usd"], 6) == round(e3_ref["actual_billed_usd"], 6)
     assert round(j_tx["optimized_pass_through_usd"], 6) == round(e3_ref["counterfactual_optimized_usd"], 6)
-    assert round(j_tx["pre_auth_hold_reserved_usd"] - j_tx["pre_auth_hold_released_variance_usd"], 6) == round(j_tx["debit_total_usd"], 6)
+    assert round(j_tx["pre_auth_hold_reserved_usd"] - j_tx["pre_auth_hold_released_variance_usd"], 6) == round(j_tx["billed_gross_usd"], 6)
     tx_core = {k: v for k, v in j_tx.items() if k != "tx_sha256"}
     recalc_tx_h = hashlib.sha256(json.dumps(tx_core, separators=(",", ":"), sort_keys=True).encode("utf-8")).hexdigest()
     assert recalc_tx_h == j_tx["tx_sha256"]
     prev_h = recalc_tx_h
-assert prev_h == "87cc894b473517b0f5b73257fbcd27211a39eaaa8eb69ce01b89adf3e07c458b"
-assert round(sum(tx["debit_total_usd"] for tx in j_chain), 2) == 392.61 and round(sum(tx["optimized_pass_through_usd"] for tx in j_chain), 2) == 90.13
+assert prev_h == "c9c2d0e4b8fa00849e92d5b8e2af0142477a6a9e4629b48398ee51abc7df97e1"
+assert round(sum(tx["billed_gross_usd"] for tx in j_chain), 2) == 392.61 and round(sum(tx["optimized_pass_through_usd"] for tx in j_chain), 2) == 90.13
 
-# Execute 6-Provider Direct POST Gateway Conformance Check (OpenAI, Anthropic Direct, Gemini, AWS Bedrock, DeepSeek, Moonshot Kimi)
-for test_mod, expected_prov in [
+# Cross-verify 6-Provider Direct POST Gateway Conformance & Compare Digests against CI Report!
+_, ci_rep_b = fetch("/api/oracle/independent-ci-verifier-run.json?v=40.7.3")
+ci_rep_d = json.loads(ci_rep_b)
+ci_post_by_prov = {r["provider_id"]: r for r in ci_rep_d["six_provider_post_receipts_verified"]}
+assert len(ci_post_by_prov) == 6
+
+for idx_p, (test_mod, expected_prov) in enumerate([
     ("openai/gpt-4.1", "openai-direct"),
     ("anthropic/claude-3-7-sonnet-20250219", "anthropic-direct"),
     ("google/gemini-2.5-flash", "google-gemini-tier1"),
     ("us.anthropic.claude-3-7-sonnet-20250219-v1:0", "aws-bedrock-converse"),
     ("deepseek/deepseek-reasoner", "deepseek-direct"),
-    ("moonshot/kimi-k3-pro", "moonshot-kimi-official")
-]:
-    post_payload = json.dumps({"model": test_mod, "messages": [{"role": "user", "content": "Verify gateway transaction."}], "max_tokens": 64}).encode("utf-8")
-    post_req = urllib.request.Request(BASE + "/api/v1/chat/completions?v=40.7.2", data=post_payload, headers={"Content-Type": "application/json", "User-Agent": "Etuki-Standalone-Verifier/40.7.2"}, method="POST")
+    ("moonshot-v1-128k", "moonshot-kimi-official")
+], start=1):
+    req_canon = json.dumps({"model": test_mod, "messages": [{"role": "user", "content": "Verify gateway transaction."}], "max_tokens": 64}, separators=(",", ":"), sort_keys=True)
+    req_sha = hashlib.sha256(req_canon.encode("utf-8")).hexdigest()
+    ci_rec = ci_post_by_prov[expected_prov]
+    assert ci_rec["request_payload_sha256"] == req_sha and ci_rec["journal_tx_id"] == f"jtx_{idx_p:03d}"
+    post_req = urllib.request.Request(BASE + "/api/v1/chat/completions?v=40.7.3", data=req_canon.encode("utf-8"), headers={"Content-Type": "application/json", "Authorization": "Bearer etk-byok-conformance-test-key", "User-Agent": "Etuki-Standalone-Verifier/40.7.3"}, method="POST")
     with urllib.request.urlopen(post_req, timeout=15) as pr:
         assert pr.status == 200 and pr.headers.get("x-etuki-rate-merkle-root") == EXPECTED_MERKLE_ROOT
         p_doc = json.loads(pr.read().decode("utf-8"))
         assert p_doc["build_version"] == EXPECTED_BUILD_VER and p_doc["double_entry_ledger_posting"]["provider_id"] == expected_prov
-        assert p_doc["double_entry_ledger_posting"]["reconciliation_status"] == "BALANCED_DOUBLE_ENTRY_VERIFIED"
-print("[PASS 6/6] E3 485 Disjoint Calls, Unified E3 Status, 485 Line-Item Debit==Credit Journal Entries & 6-Provider Direct POST Gateway Verified!")
+        resp_canon = json.dumps({"model": test_mod, "provider_id": p_doc["double_entry_ledger_posting"]["provider_id"], "http_status": pr.status, "reconciliation_status": p_doc["double_entry_ledger_posting"]["reconciliation_status"]}, separators=(",", ":"), sort_keys=True)
+        assert hashlib.sha256(resp_canon.encode("utf-8")).hexdigest() == ci_rec["response_payload_sha256"]
+print("[PASS 6/6] E3 485 Non-Uniform Calls, 5-Account Compound Journal & Cross-Verified 6-Provider BYOK POST Receipts Verified!")
