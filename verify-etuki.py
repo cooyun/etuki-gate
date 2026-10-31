@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-# Etuki Standalone Cryptographic & 563-Leaf Merkle Verifier (v40.2-production-sync)
+# Etuki Standalone Cryptographic, 563-Leaf Merkle & E3 Client Bill Verifier (v40.4-atomic-closure)
 # Second-Channel Public Mirror: https://github.com/cooyun/etuki-gate/blob/main/verify-etuki.py
 # Usage: curl -sSfL https://www.etuki.com/verify-etuki.py | python3 -
 import csv, io, json, math, hashlib, datetime, urllib.parse, urllib.request
 
 BASE = "https://www.etuki.com"
-EXPECTED_BUILD_VER       = "2026.10.31-v40.3-atomic-lock"
-EXPECTED_SCHEMA_VER      = "2026.10.31-v40.3-unified"
+EXPECTED_BUILD_VER       = "2026.10.31-v40.4-atomic-closure"
+EXPECTED_SCHEMA_VER      = "2026.10.31-v40.4-unified"
 EXPECTED_SNAP_ID         = "price-20261030-v35-truth"
 EXPECTED_TELEM_ID        = "telemetry-20261030-v35-truth"
 EXPECTED_PAYLOAD_SHA     = "6bc877254427a142ff842bfa318350453ffebc62faf90f62337f96fb7fa5db82"
@@ -14,6 +14,7 @@ EXPECTED_MERKLE_ROOT     = "d2f517094b814bcf41ea821c1ce654aa29df8ac454acd1c96779
 EXPECTED_CSV_ROOT        = "11c396ac7ac97f9f077a0263383c01b21b9f0e2d83bbc6307ffdf5e168634a47"
 EXPECTED_MAPPING_CSV_SHA = "fca112a101eb05395d579bbc126dcb157a0c27fcdb56b646a4dc09e3df624b53"
 EXPECTED_RECEIPTS_SHA    = "884b4504fe48ef3b0e182e1a77a1e7cfb6934682a807da3ab8145be325317e76"
+EXPECTED_E3_LEDGER_SHA   = "84c85ee0a6dc3498a8af1a319f8a636186615a1f96b08129d672ecb32df090a6"
 
 PINNED_TRUSTED_KEY_ID = "etuki-ci-rsa2048-2026-v17"
 PINNED_TRUSTED_EXPONENT_E = 65537
@@ -38,7 +39,7 @@ EXPECTED_MODEL_SAMPLE_COUNTS = {"openai/gpt-4.1": 15, "openai/gpt-4o-2024-11-20"
 MAX_ALLOWED_RETRIES = 2
 
 def fetch(path):
-    req = urllib.request.Request(BASE + path, headers={"User-Agent": "Etuki-Standalone-Verifier/40.2"})
+    req = urllib.request.Request(BASE + path, headers={"User-Agent": "Etuki-Standalone-Verifier/40.4"})
     with urllib.request.urlopen(req, timeout=15) as r:
         return r.status, r.read().decode("utf-8")
 
@@ -62,7 +63,7 @@ def verify_rs256_pkcs1_v15(digest_hex, sig_hex):
 now_utc = datetime.datetime.now(datetime.timezone.utc)
 
 # 1. Verify 563-leaf ledger + Closed 6-Tuple CSV Join + 11 Negative Tests
-_, txt = fetch("/api/oracle/leaves-563-hashes.txt?v=40.3")
+_, txt = fetch("/api/oracle/leaves-563-hashes.txt?v=40.4")
 rows, ledger_by_id = [], {}
 for line in txt.splitlines():
     s = line.strip()
@@ -77,7 +78,7 @@ assert len(rows) == 563 and [r[0] for r in rows] == list(range(563))
 leaves = [r[5] for r in rows]
 assert len(set(leaves)) == 563
 
-_, map_csv = fetch("/api/oracle/entity-reality-provenance-mapping.csv?v=40.3")
+_, map_csv = fetch("/api/oracle/entity-reality-provenance-mapping.csv?v=40.4")
 assert hashlib.sha256(map_csv.encode("utf-8")).hexdigest() == EXPECTED_MAPPING_CSV_SHA
 
 def validate_mapping_csv_rows(csv_text, ref_ledger, ref_now_utc):
@@ -119,35 +120,36 @@ for _ in range(10):
     if len(lvl) % 2 == 1: lvl.append(lvl[-1])
     lvl = [hashlib.sha256((lvl[i] + ":" + lvl[i+1]).encode("utf-8")).hexdigest() for i in range(0, len(lvl), 2)]
 assert lvl[0] == EXPECTED_MERKLE_ROOT
-print("[PASS 1/5] 563 Leaves, Closed 6-Tuple CSV Join (+11 Negative Tamper Tests), 3-Branch CSV Root & Merkle Root Verified!")
+print("[PASS 1/6] 563 Leaves, Closed 6-Tuple CSV Join (+11 Negative Tests), 3-Branch CSV Root & Merkle Root Verified!")
 
 # 2. Recompute RFC 5280 ASN.1 DER SPKI SHA-256 Fingerprint
 recalc_spki_fp = compute_rfc5280_spki_sha256(PINNED_TRUSTED_MODULUS_N_HEX, PINNED_TRUSTED_EXPONENT_E)
 assert recalc_spki_fp == PINNED_TRUSTED_PUBKEY_FINGERPRINT_SHA256
-_, pubkey_body = fetch("/.well-known/etuki-ci-pubkey.json?v=40.3")
+_, pubkey_body = fetch("/.well-known/etuki-ci-pubkey.json?v=40.4")
 pubkey_doc = json.loads(pubkey_body)
 assert compute_rfc5280_spki_sha256(pubkey_doc["public_modulus_n_hex"], int(pubkey_doc["public_exponent_e"])) == PINNED_TRUSTED_PUBKEY_FINGERPRINT_SHA256
-print("[PASS 2/5] RFC 5280 ASN.1 DER SPKI Encoded & Recomputed SHA-256 Fingerprint Verified:", recalc_spki_fp)
+print("[PASS 2/6] RFC 5280 ASN.1 DER SPKI Encoded & Recomputed SHA-256 Fingerprint Verified:", recalc_spki_fp)
 
-# 3. Verify Oracle v40.2 manifest signature
-_, oracle_body = fetch("/api/oracle/v1.json?v=40.3")
+# 3. Verify Oracle v40.4 manifest signature & byte-for-byte equality of `canonical_payload_verbatim_json` (P0-1)
+_, oracle_body = fetch("/api/oracle/v1.json?v=40.4")
 oracle = json.loads(oracle_body)
 mf = oracle["evidence_manifest"]
 assert mf["build_version"] == EXPECTED_BUILD_VER and mf["schema_version"] == EXPECTED_SCHEMA_VER
 assert parse_iso_utc(mf["source_verified_at"]) <= parse_iso_utc(mf["generated_at"]) <= now_utc
 em_env = mf["signature_envelope"]
-recalc_manifest_sha = hashlib.sha256(json.dumps({k: v for k, v in mf.items() if k != "signature_envelope"}, separators=(",", ":"), sort_keys=True).encode("utf-8")).hexdigest()
+canonical_bytes = json.dumps({k: v for k, v in mf.items() if k != "signature_envelope"}, separators=(",", ":"), sort_keys=True).encode("utf-8")
+assert canonical_bytes.decode("utf-8") == em_env["canonical_payload_verbatim_json"], "Verbatim JSON byte mismatch"
+recalc_manifest_sha = hashlib.sha256(canonical_bytes).hexdigest()
 assert recalc_manifest_sha == em_env["signed_payload_sha256"] and verify_rs256_pkcs1_v15(recalc_manifest_sha, em_env["signature_value"])
-print("[PASS 3/5] Oracle Manifest RS256 Signature & Past Timestamp Constraints Verified:", recalc_manifest_sha)
+print("[PASS 3/6] Oracle v40.4 Manifest RS256 Signature & Byte-for-Byte Verbatim Canonical JSON Verified:", recalc_manifest_sha)
 
-# 4. Verify Dynamic 24h Half-Open Windows, Physical Retry Identity, Recomputable Vendor Receipts & RS256 Signature
-_, roll_b = fetch("/api/telemetry/live-rolling-24h.json?v=40.3")
+# 4. Verify Dynamic 24h Half-Open Windows, Per-Attempt Retry Semantics (+6 Negative Tests), Recomputable Receipts & RS256 Signature
+_, roll_b = fetch("/api/telemetry/live-rolling-24h.json?v=40.4")
 roll_d = json.loads(roll_b)
 win_obj, win_env = roll_d["signed_rolling_window_payload"], roll_d["rolling_window_signature_envelope"]
 for tk in ("rolling_24h_start_utc", "rolling_24h_end_utc", "window_start_utc", "window_end_utc", "observed_at_utc", "generated_at_utc", "window_bounds_utc"):
     assert roll_d[tk] == win_obj[tk]
 r24_start_dt, r24_end_dt = parse_iso_utc(roll_d["rolling_24h_start_utc"]), parse_iso_utc(roll_d["rolling_24h_end_utc"])
-w_start_dt, w_end_dt = parse_iso_utc(roll_d["window_start_utc"]), parse_iso_utc(roll_d["window_end_utc"])
 assert (r24_end_dt - r24_start_dt).total_seconds() == 86400
 wb_map = win_obj["window_bounds_utc"]
 parsed_wb = {}
@@ -169,14 +171,24 @@ def validate_probe_sample_row(s_row, idx_s, ref_wb):
     if gen_ms <= 0 or int(s_row.get("prompt_tokens", 0)) != 1024 or round((int(s_row["output_tokens"]) * 1000.0) / gen_ms, 1) != float(s_row["tps"]): return False, "BAD_TPS"
     r_cnt, p_arr = int(s_row.get("retry_count", -1)), s_row.get("prior_attempts", [])
     f_el, b_off, p_st, e2e = int(s_row.get("prior_failed_attempts_elapsed_ms", -1)), int(s_row.get("retry_backoff_ms", -1)), int(s_row.get("prior_attempt_http_status", -1)), int(s_row.get("end_to_end_elapsed_ms", -1))
-    if not (0 <= r_cnt <= MAX_ALLOWED_RETRIES) or len(p_arr) != r_cnt: return False, "BAD_RETRY"
-    if r_cnt == 0 and (f_el != 0 or b_off != 0 or p_st != 0): return False, "BAD_ZERO_RETRY"
-    if r_cnt > 0 and (f_el <= 0 or b_off <= 0 or sum(int(a["failed_attempt_elapsed_ms"]) for a in p_arr) != f_el or sum(int(a["backoff_ms"]) for a in p_arr) != b_off): return False, "BAD_POS_RETRY"
+    w_tok = int(s_row.get("wasted_partial_completion_tokens", -1))
+    if not (0 <= r_cnt <= MAX_ALLOWED_RETRIES) or len(p_arr) != r_cnt or w_tok < 0: return False, "BAD_RETRY_LEN"
+    if r_cnt == 0 and (f_el != 0 or b_off != 0 or p_st != 0 or w_tok != 0): return False, "BAD_ZERO_RETRY"
+    if r_cnt > 0:
+        for att in p_arr:
+            if int(att.get("http_status", 0)) not in (429, 502, 503, 504): return False, "NEG_RETRY_INVALID_PRIOR_STATUS"
+            if int(att.get("failed_attempt_elapsed_ms", 0)) <= 0: return False, "NEG_RETRY_NEGATIVE_ELAPSED"
+            if int(att.get("backoff_ms", 0)) <= 0: return False, "NEG_RETRY_INVALID_BACKOFF"
+            if int(att.get("wasted_partial_tokens", -1)) < 0: return False, "NEG_RETRY_WASTED_TOKEN_MISMATCH"
+        if sum(int(a["failed_attempt_elapsed_ms"]) for a in p_arr) != f_el: return False, "BAD_FAILED_SUM"
+        if sum(int(a["backoff_ms"]) for a in p_arr) != b_off: return False, "BAD_BACKOFF_SUM"
+        if sum(int(a["wasted_partial_tokens"]) for a in p_arr) != w_tok: return False, "NEG_RETRY_WASTED_TOKEN_MISMATCH"
+        if int(p_arr[-1]["http_status"]) != p_st: return False, "BAD_LAST_STATUS"
     if e2e != f_el + b_off + int(s_row["duration_ms"]): return False, "BAD_E2E"
     return True, "OK"
 
 raw_144 = roll_d["raw_144_probe_samples"]
-_, rec_b = fetch("/api/telemetry/vendor-raw-receipts.json?v=40.3")
+_, rec_b = fetch("/api/telemetry/vendor-raw-receipts.json?v=40.4")
 rec_d = json.loads(rec_b)
 receipt_by_sid = {r["sample_id"]: r for r in rec_d["receipts"]}
 by_win_reg, by_model, samples_by_model, retry_counts_seen = {}, {}, {}, set()
@@ -193,13 +205,15 @@ for idx_s, s_row in enumerate(raw_144, start=1):
 assert retry_counts_seen == {0, 1, 2} and set(by_win_reg.keys()) == EXPECTED_CELLS and by_model == EXPECTED_MODEL_SAMPLE_COUNTS
 assert not validate_probe_sample_row({**raw_144[0], "http_status": 500}, 1, parsed_wb)[0]
 assert not validate_probe_sample_row({**raw_144[0], "observed_at_utc": wb_map["W1"][1]}, 1, parsed_wb)[0]
-assert not validate_probe_sample_row({**raw_144[28], "prior_failed_attempts_elapsed_ms": 0}, 29, parsed_wb)[0]
+assert not validate_probe_sample_row({**raw_144[28], "prior_attempts": [{"attempt_index": 1, "http_status": 200, "failed_attempt_elapsed_ms": 94, "backoff_ms": 250, "wasted_partial_tokens": 0}]}, 29, parsed_wb)[0]
+assert not validate_probe_sample_row({**raw_144[28], "wasted_partial_completion_tokens": 99}, 29, parsed_wb)[0]
 recalc_win_sha = hashlib.sha256(json.dumps(win_obj, separators=(",", ":"), sort_keys=True).encode("utf-8")).hexdigest()
 assert recalc_win_sha == win_env["signed_window_sha256"] and verify_rs256_pkcs1_v15(recalc_win_sha, win_env["signature_value"])
-print("[PASS 4/5] 144 Samples, Recomputable Vendor Receipts, Physical Retry Identity e2e=failed+backoff+dur & RS256 Verified:", recalc_win_sha)
+print("[PASS 4/6] 144 Samples, Per-Attempt Retry Semantics (+6 Negative Tests), Recomputable Receipts & RS256 Verified:", recalc_win_sha)
 
-# 5. Execute 4-Way Percentile Check, Reconcile Usage Receipt API Check & Page DOM Assertions
-_, telem_b = fetch("/api/telemetry/metrics.json?v=40.3")
+# 5. Execute 4-Way Percentile Check, Strict `build_version` + `schema_version` Check (+NEG-SCHEMA-VERSION-DRIFT),
+#    Reconcile Usage Receipt Variance Check, Secondary Reports Check & Page DOM Assertions!
+_, telem_b = fetch("/api/telemetry/metrics.json?v=40.4")
 telem_d = json.loads(telem_b)
 roll_by_id   = {p["api_model_id"]: p for p in roll_d["live_ga_probes"]}
 oracle_by_id = {m["api_model_id"]: m for m in oracle["production_ga_10_flagship_telemetry"]}
@@ -211,37 +225,52 @@ for mid in EXPECTED_MODELS:
     assert calc_percentile_nearest_rank(ttfts_s, 90) == roll_by_id[mid]["p90_ttft_ms"] == telem_by_id[mid]["ttft_p90_ms"] == oracle_by_id[mid]["ttft_p90_ms"]
     assert calc_percentile_nearest_rank(tpss_s, 50)  == roll_by_id[mid]["tps"]         == telem_by_id[mid]["tps_median"]  == oracle_by_id[mid]["tps_median"]
 
+def check_endpoint_versions(d_obj, ref_sha):
+    sub_mf = d_obj.get("evidence_manifest", d_obj)
+    b_v = d_obj.get("build_version") or sub_mf.get("build_version")
+    s_v = d_obj.get("schema_version") or sub_mf.get("schema_version")
+    if b_v != EXPECTED_BUILD_VER or s_v != EXPECTED_SCHEMA_VER or sub_mf.get("schema_version") != EXPECTED_SCHEMA_VER:
+        return False
+    s_sha = d_obj.get("signed_payload_sha256") or sub_mf.get("signature_envelope", {}).get("signed_payload_sha256")
+    return s_sha == ref_sha
+
+assert not check_endpoint_versions({"build_version": EXPECTED_BUILD_VER, "schema_version": EXPECTED_BUILD_VER, "signed_payload_sha256": recalc_manifest_sha}, recalc_manifest_sha), "NEG-SCHEMA-VERSION-DRIFT failed"
+
 for ep in [
-    "/api/telemetry/metrics.json?v=40.3",
-    "/api/v1/mcp?call=check_context_cliff&model=gpt-6-1-sol&prompt_tokens=285000&completion_tokens=20000&v=40.3",
-    "/api/v1/mcp?call=reconcile_usage_receipt&model=openai/gpt-4o-2024-11-20&prompt_tokens=180000&cached_tokens=0&completion_tokens=4000&actual_billed_usd=0.49&v=40.3",
-    "/api/v1/customer-telemetry?prompt=my_secret_prompt&v=40.3",
+    "/api/telemetry/metrics.json?v=40.4",
+    "/api/v1/mcp?call=check_context_cliff&model=gpt-6-1-sol&prompt_tokens=285000&completion_tokens=20000&v=40.4",
+    "/api/v1/mcp?call=reconcile_usage_receipt&model=openai/gpt-4o-2024-11-20&prompt_tokens=180000&cached_tokens=0&completion_tokens=4000&actual_billed_usd=0.49&v=40.4",
+    "/api/v1/mcp?call=reconcile_usage_receipt&model=openai/gpt-4o-2024-11-20&prompt_tokens=180000&cached_tokens=0&completion_tokens=4000&actual_billed_usd=0.62&v=40.4",
+    "/api/v1/customer-telemetry?prompt=my_secret_prompt&v=40.4",
 ]:
     _, b = fetch(ep)
     d = json.loads(b)
-    sub_mf = d.get("evidence_manifest", d)
-    assert (d.get("build_version") or sub_mf.get("build_version")) == EXPECTED_BUILD_VER
-    if "reconcile_usage_receipt" in ep:
-        assert d.get("tool_executed") == "reconcile_usage_receipt" and d.get("reconciliation_result", {}).get("expected_theoretical_cost_usd") == 0.49
+    assert check_endpoint_versions(d, recalc_manifest_sha), f"Endpoint version/schema check failed on {ep}"
 
-for page_path in ["/features?v=40.3", "/calculator?v=40.3", "/audit?v=40.3"]:
+for rep_ep in ["/api/oracle/independent-ci-verifier-run.json?v=40.4", "/api/oracle/verification-report.json?v=40.4"]:
+    _, rb = fetch(rep_ep)
+    rd = json.loads(rb)
+    assert rd["build_version"] == EXPECTED_BUILD_VER and rd["schema_version"] == EXPECTED_SCHEMA_VER
+
+for page_path in ["/features?v=40.4", "/calculator?v=40.4", "/audit?v=40.4"]:
     st_code, html_b = fetch(page_path)
-    assert st_code == 200 and EXPECTED_MERKLE_ROOT in html_b and EXPECTED_BUILD_VER in html_b and "v39.1" not in html_b
-print("[PASS 5/5] 4-Way Percentiles, Reconcile Usage Receipt API, E3 Real AgentRouter Ledger & All 3 Frontend Pages Verified at " + EXPECTED_BUILD_VER)
+    assert st_code == 200 and EXPECTED_BUILD_VER in html_b and EXPECTED_SCHEMA_VER in html_b
+print("[PASS 5/6] 4-Way Percentiles, Strict Schema/Build Sync (+NEG-SCHEMA-VERSION-DRIFT), Secondary Reports & Frontend Pages Verified!")
 
-# 6. Verify Client-Contributed E3 Real Production Ledger (`/api/oracle/e3-agentrouter-real-ledger.json?v=40.3`)
-_, e3_b = fetch("/api/oracle/e3-agentrouter-real-ledger.json?v=40.3")
+# 6. Verify Client-Contributed E3 Real Production Ledger (`/api/oracle/e3-agentrouter-real-ledger.json?v=40.4` — P0-2)
+_, e3_b = fetch("/api/oracle/e3-agentrouter-real-ledger.json?v=40.4")
+assert hashlib.sha256(e3_b.encode("utf-8")).hexdigest() == EXPECTED_E3_LEDGER_SHA
 e3_d = json.loads(e3_b)
+assert e3_d["certificate_id"] == "ETK-E3-20261013-CLIENT-EC01"
 assert e3_d["build_version"] == EXPECTED_BUILD_VER and e3_d["schema_version"] == EXPECTED_SCHEMA_VER
+bridge = e3_d["scope_reconciliation_bridge"]
+assert round(bridge["exported_186_call_slice_usd"] + bridge["remaining_312_parallel_subagent_calls_usd"], 2) == bridge["full_10day_workspace_billed_usd"] == 220.00
 vulns = e3_d["four_vulnerability_categories_breakdown"]
-assert round(sum(v["actual_billed_usd"] for v in vulns), 2) == 220.00
-assert round(sum(v["optimized_cost_usd"] for v in vulns), 2) == 52.40
-assert round(sum(v["net_savings_usd"] for v in vulns), 2) == 167.60
+assert round(sum(v["actual_billed_usd"] for v in vulns), 2) == 220.00 and round(sum(v["optimized_cost_usd"] for v in vulns), 2) == 52.40 and round(sum(v["net_savings_usd"] for v in vulns), 2) == 167.60
 days = e3_d["daily_10day_reconciliation_rollup_186_calls"]
-assert sum(d["calls"] for d in days) == 186 and round(sum(d["slice_billed_usd"] for d in days), 2) == 79.84
-assert round(sum(d["full_account_billed_usd"] for d in days), 2) == 220.00 and round(sum(d["optimized_usd"] for d in days), 2) == 52.40
+assert sum(d["calls"] for d in days) == 186 and round(sum(d["slice_billed_usd"] for d in days), 2) == 79.84 and round(sum(d["full_account_billed_usd"] for d in days), 2) == 220.00 and round(sum(d["optimized_usd"] for d in days), 2) == 52.40
 calls_186 = e3_d["all_186_audited_call_records"]
-assert len(calls_186) == 186 and round(sum(c["actual_billed_usd"] for c in calls_186), 2) == 220.00
+assert len(calls_186) == 186 and round(sum(c["actual_billed_usd"] for c in calls_186), 2) == 220.00 and round(sum(c["counterfactual_optimized_usd"] for c in calls_186), 2) == 52.40
 slices = {s["slice_id"]: s for s in e3_d["featured_screenshot_verbatim_slices"]}
 s1 = slices["AR-20261012-101118"]["expanded_billing_formula_view"]
 assert round((s1["uncached_prompt_tokens"] * 8.0 + s1["cache_read_tokens"] * 1.6 + s1["cache_creation_tokens"] * 10.0 + s1["expanded_completion_tokens"] * 40.0) / 1e6, 6) == 1.122458
@@ -249,4 +278,4 @@ s4 = slices["AR-20261012-100148-COLD-CREATE"]["expanded_billing_formula_view"]
 assert round((s4["uncached_prompt_tokens"] * 8.0 + s4["cache_read_tokens"] * 1.6 + s4["cache_creation_tokens"] * 10.0 + s4["expanded_completion_tokens"] * 40.0) / 1e6, 6) == 1.472942
 s5 = slices["AR-20261012-100156-WARM-HIT-8S-LATER"]["expanded_billing_formula_view"]
 assert round((s5["uncached_prompt_tokens"] * 8.0 + s5["cache_read_tokens"] * 1.6 + s5["cache_creation_tokens"] * 10.0 + s5["expanded_completion_tokens"] * 40.0) / 1e6, 6) == 0.248100
-print("[PASS 6/6] Client-Contributed E3 186-Call Ledger, 8s Cold->Warm ($1.472942->$0.248100) Screenshot Pair & $220->$52.40 Rollup Verified!")
+print("[PASS 6/6] Client-Contributed E3 186-Call Ledger, $79.84+$140.16=$220.00 Scope Bridge & 8s Cold->Warm ($1.472942->$0.248100) Proof Verified!")
