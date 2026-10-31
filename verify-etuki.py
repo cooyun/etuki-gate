@@ -281,6 +281,9 @@ assert round((s4["uncached_prompt_tokens"] * 8.0 + s4["cache_read_tokens"] * 1.6
 s5 = slices["AR-20261012-100156-WARM-HIT-8S-LATER"]["expanded_billing_formula_view"]
 assert round((s5["uncached_prompt_tokens"] * 8.0 + s5["cache_read_tokens"] * 1.6 + s5["cache_creation_tokens"] * 10.0 + s5["expanded_completion_tokens"] * 40.0) / 1e6, 6) == 0.248100
 _, gw_b = fetch("/api/v1/chat/completions?v=40.5")
+_, ldg_b = fetch("/api/v1/ledger?v=40.5")
+ldg_d = json.loads(ldg_b)
+assert ldg_d["build_version"] == EXPECTED_BUILD_VER and len(ldg_d["seven_immutable_ledgers"]) == 7
 gw_d = json.loads(gw_b)
 assert gw_d["build_version"] == EXPECTED_BUILD_VER and gw_d["schema_version"] == EXPECTED_SCHEMA_VER and gw_d["double_entry_ledger_posting_sample"]["reconciliation_status"] == "BALANCED_DOUBLE_ENTRY_VERIFIED"
 print("[PASS 6/6] E3 186-Call ($79.84) & 485-Call ($392.61) Ledger, 10:11:18 3-Way Settlement Variance & BYOK Gateway Double-Entry Ledger Verified!")
