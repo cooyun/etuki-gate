@@ -5,8 +5,8 @@
 import csv, io, json, math, hashlib, datetime, urllib.parse, urllib.request
 
 BASE = "https://www.etuki.com"
-EXPECTED_BUILD_VER       = "2026.10.30-v40.2-production-sync"
-EXPECTED_SCHEMA_VER      = "2026.10.30-v40.2-unified"
+EXPECTED_BUILD_VER       = "2026.10.31-v40.3-atomic-lock"
+EXPECTED_SCHEMA_VER      = "2026.10.31-v40.3-unified"
 EXPECTED_SNAP_ID         = "price-20261030-v35-truth"
 EXPECTED_TELEM_ID        = "telemetry-20261030-v35-truth"
 EXPECTED_PAYLOAD_SHA     = "6bc877254427a142ff842bfa318350453ffebc62faf90f62337f96fb7fa5db82"
@@ -62,7 +62,7 @@ def verify_rs256_pkcs1_v15(digest_hex, sig_hex):
 now_utc = datetime.datetime.now(datetime.timezone.utc)
 
 # 1. Verify 563-leaf ledger + Closed 6-Tuple CSV Join + 11 Negative Tests
-_, txt = fetch("/api/oracle/leaves-563-hashes.txt?v=40.2")
+_, txt = fetch("/api/oracle/leaves-563-hashes.txt?v=40.3")
 rows, ledger_by_id = [], {}
 for line in txt.splitlines():
     s = line.strip()
@@ -77,7 +77,7 @@ assert len(rows) == 563 and [r[0] for r in rows] == list(range(563))
 leaves = [r[5] for r in rows]
 assert len(set(leaves)) == 563
 
-_, map_csv = fetch("/api/oracle/entity-reality-provenance-mapping.csv?v=40.2")
+_, map_csv = fetch("/api/oracle/entity-reality-provenance-mapping.csv?v=40.3")
 assert hashlib.sha256(map_csv.encode("utf-8")).hexdigest() == EXPECTED_MAPPING_CSV_SHA
 
 def validate_mapping_csv_rows(csv_text, ref_ledger, ref_now_utc):
@@ -124,13 +124,13 @@ print("[PASS 1/5] 563 Leaves, Closed 6-Tuple CSV Join (+11 Negative Tamper Tests
 # 2. Recompute RFC 5280 ASN.1 DER SPKI SHA-256 Fingerprint
 recalc_spki_fp = compute_rfc5280_spki_sha256(PINNED_TRUSTED_MODULUS_N_HEX, PINNED_TRUSTED_EXPONENT_E)
 assert recalc_spki_fp == PINNED_TRUSTED_PUBKEY_FINGERPRINT_SHA256
-_, pubkey_body = fetch("/.well-known/etuki-ci-pubkey.json?v=40.2")
+_, pubkey_body = fetch("/.well-known/etuki-ci-pubkey.json?v=40.3")
 pubkey_doc = json.loads(pubkey_body)
 assert compute_rfc5280_spki_sha256(pubkey_doc["public_modulus_n_hex"], int(pubkey_doc["public_exponent_e"])) == PINNED_TRUSTED_PUBKEY_FINGERPRINT_SHA256
 print("[PASS 2/5] RFC 5280 ASN.1 DER SPKI Encoded & Recomputed SHA-256 Fingerprint Verified:", recalc_spki_fp)
 
 # 3. Verify Oracle v40.2 manifest signature
-_, oracle_body = fetch("/api/oracle/v1.json?v=40.2")
+_, oracle_body = fetch("/api/oracle/v1.json?v=40.3")
 oracle = json.loads(oracle_body)
 mf = oracle["evidence_manifest"]
 assert mf["build_version"] == EXPECTED_BUILD_VER and mf["schema_version"] == EXPECTED_SCHEMA_VER
@@ -141,7 +141,7 @@ assert recalc_manifest_sha == em_env["signed_payload_sha256"] and verify_rs256_p
 print("[PASS 3/5] Oracle Manifest RS256 Signature & Past Timestamp Constraints Verified:", recalc_manifest_sha)
 
 # 4. Verify Dynamic 24h Half-Open Windows, Physical Retry Identity, Recomputable Vendor Receipts & RS256 Signature
-_, roll_b = fetch("/api/telemetry/live-rolling-24h.json?v=40.2")
+_, roll_b = fetch("/api/telemetry/live-rolling-24h.json?v=40.3")
 roll_d = json.loads(roll_b)
 win_obj, win_env = roll_d["signed_rolling_window_payload"], roll_d["rolling_window_signature_envelope"]
 for tk in ("rolling_24h_start_utc", "rolling_24h_end_utc", "window_start_utc", "window_end_utc", "observed_at_utc", "generated_at_utc", "window_bounds_utc"):
@@ -176,7 +176,7 @@ def validate_probe_sample_row(s_row, idx_s, ref_wb):
     return True, "OK"
 
 raw_144 = roll_d["raw_144_probe_samples"]
-_, rec_b = fetch("/api/telemetry/vendor-raw-receipts.json?v=40.2")
+_, rec_b = fetch("/api/telemetry/vendor-raw-receipts.json?v=40.3")
 rec_d = json.loads(rec_b)
 receipt_by_sid = {r["sample_id"]: r for r in rec_d["receipts"]}
 by_win_reg, by_model, samples_by_model, retry_counts_seen = {}, {}, {}, set()
@@ -199,7 +199,7 @@ assert recalc_win_sha == win_env["signed_window_sha256"] and verify_rs256_pkcs1_
 print("[PASS 4/5] 144 Samples, Recomputable Vendor Receipts, Physical Retry Identity e2e=failed+backoff+dur & RS256 Verified:", recalc_win_sha)
 
 # 5. Execute 4-Way Percentile Check, Reconcile Usage Receipt API Check & Page DOM Assertions
-_, telem_b = fetch("/api/telemetry/metrics.json?v=40.2")
+_, telem_b = fetch("/api/telemetry/metrics.json?v=40.3")
 telem_d = json.loads(telem_b)
 roll_by_id   = {p["api_model_id"]: p for p in roll_d["live_ga_probes"]}
 oracle_by_id = {m["api_model_id"]: m for m in oracle["production_ga_10_flagship_telemetry"]}
@@ -212,10 +212,10 @@ for mid in EXPECTED_MODELS:
     assert calc_percentile_nearest_rank(tpss_s, 50)  == roll_by_id[mid]["tps"]         == telem_by_id[mid]["tps_median"]  == oracle_by_id[mid]["tps_median"]
 
 for ep in [
-    "/api/telemetry/metrics.json?v=40.2",
-    "/api/v1/mcp?call=check_context_cliff&model=gpt-6-1-sol&prompt_tokens=285000&completion_tokens=20000&v=40.2",
-    "/api/v1/mcp?call=reconcile_usage_receipt&model=openai/gpt-4o-2024-11-20&prompt_tokens=180000&cached_tokens=0&completion_tokens=4000&actual_billed_usd=0.49&v=40.2",
-    "/api/v1/customer-telemetry?prompt=my_secret_prompt&v=40.2",
+    "/api/telemetry/metrics.json?v=40.3",
+    "/api/v1/mcp?call=check_context_cliff&model=gpt-6-1-sol&prompt_tokens=285000&completion_tokens=20000&v=40.3",
+    "/api/v1/mcp?call=reconcile_usage_receipt&model=openai/gpt-4o-2024-11-20&prompt_tokens=180000&cached_tokens=0&completion_tokens=4000&actual_billed_usd=0.49&v=40.3",
+    "/api/v1/customer-telemetry?prompt=my_secret_prompt&v=40.3",
 ]:
     _, b = fetch(ep)
     d = json.loads(b)
@@ -224,7 +224,29 @@ for ep in [
     if "reconcile_usage_receipt" in ep:
         assert d.get("tool_executed") == "reconcile_usage_receipt" and d.get("reconciliation_result", {}).get("expected_theoretical_cost_usd") == 0.49
 
-for page_path in ["/features?v=40.2", "/calculator?v=40.2", "/audit?v=40.2"]:
+for page_path in ["/features?v=40.3", "/calculator?v=40.3", "/audit?v=40.3"]:
     st_code, html_b = fetch(page_path)
     assert st_code == 200 and EXPECTED_MERKLE_ROOT in html_b and EXPECTED_BUILD_VER in html_b and "v39.1" not in html_b
 print("[PASS 5/5] 4-Way Percentiles, Reconcile Usage Receipt API, E3 Real AgentRouter Ledger & All 3 Frontend Pages Verified at " + EXPECTED_BUILD_VER)
+
+# 6. Verify Client-Contributed E3 Real Production Ledger (`/api/oracle/e3-agentrouter-real-ledger.json?v=40.3`)
+_, e3_b = fetch("/api/oracle/e3-agentrouter-real-ledger.json?v=40.3")
+e3_d = json.loads(e3_b)
+assert e3_d["build_version"] == EXPECTED_BUILD_VER and e3_d["schema_version"] == EXPECTED_SCHEMA_VER
+vulns = e3_d["four_vulnerability_categories_breakdown"]
+assert round(sum(v["actual_billed_usd"] for v in vulns), 2) == 220.00
+assert round(sum(v["optimized_cost_usd"] for v in vulns), 2) == 52.40
+assert round(sum(v["net_savings_usd"] for v in vulns), 2) == 167.60
+days = e3_d["daily_10day_reconciliation_rollup_186_calls"]
+assert sum(d["calls"] for d in days) == 186 and round(sum(d["slice_billed_usd"] for d in days), 2) == 79.84
+assert round(sum(d["full_account_billed_usd"] for d in days), 2) == 220.00 and round(sum(d["optimized_usd"] for d in days), 2) == 52.40
+calls_186 = e3_d["all_186_audited_call_records"]
+assert len(calls_186) == 186 and round(sum(c["actual_billed_usd"] for c in calls_186), 2) == 220.00
+slices = {s["slice_id"]: s for s in e3_d["featured_screenshot_verbatim_slices"]}
+s1 = slices["AR-20261012-101118"]["expanded_billing_formula_view"]
+assert round((s1["uncached_prompt_tokens"] * 8.0 + s1["cache_read_tokens"] * 1.6 + s1["cache_creation_tokens"] * 10.0 + s1["expanded_completion_tokens"] * 40.0) / 1e6, 6) == 1.122458
+s4 = slices["AR-20261012-100148-COLD-CREATE"]["expanded_billing_formula_view"]
+assert round((s4["uncached_prompt_tokens"] * 8.0 + s4["cache_read_tokens"] * 1.6 + s4["cache_creation_tokens"] * 10.0 + s4["expanded_completion_tokens"] * 40.0) / 1e6, 6) == 1.472942
+s5 = slices["AR-20261012-100156-WARM-HIT-8S-LATER"]["expanded_billing_formula_view"]
+assert round((s5["uncached_prompt_tokens"] * 8.0 + s5["cache_read_tokens"] * 1.6 + s5["cache_creation_tokens"] * 10.0 + s5["expanded_completion_tokens"] * 40.0) / 1e6, 6) == 0.248100
+print("[PASS 6/6] Client-Contributed E3 186-Call Ledger, 8s Cold->Warm ($1.472942->$0.248100) Screenshot Pair & $220->$52.40 Rollup Verified!")
